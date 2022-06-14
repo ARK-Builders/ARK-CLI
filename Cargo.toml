@@ -8,7 +8,7 @@ name = "ark-cli"
 
 [dependencies]
 arklib = { git = "https://github.com/nagato-chan/arklib" }
-# arklib = { path = "../arklib" }
+
 clap = { version = "3.0.10", features = ["derive"] }
 env_logger = "0.8.4"
 walkdir = "2.3.2"
