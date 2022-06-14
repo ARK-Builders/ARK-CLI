@@ -170,8 +170,18 @@ fn main() {
                 "low" => PDFQuailty::Low,
                 _ => panic!("unknown render option"),
             };
-            let buf = fs::read(filepath).unwrap();
-            arklib::pdf::render_preview_page(buf.as_slice(), quality);
+            let buf = fs::read(&filepath).unwrap();
+            let dest_path = filepath.with_file_name(
+                filepath
+                    .file_stem()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
+                    + ".png",
+            );
+            let img = arklib::pdf::render_preview_page(buf.as_slice(), quality);
+            img.save(PathBuf::from(dest_path)).unwrap();
         }
     }
 }
