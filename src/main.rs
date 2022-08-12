@@ -4,11 +4,12 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::{env::current_dir, fs};
+use std::{env::current_dir};
 
 use arklib::pdf::PDFQuality;
 use clap::{Parser, Subcommand};
 use home::home_dir;
+use url::Url;
 
 #[derive(Parser, Debug)]
 #[clap(name = "ark-cli")]
@@ -41,6 +42,25 @@ enum Command {
         path: Option<PathBuf>,
         quality: Option<String>,
     },
+    #[clap(subcommand)]
+    Link(Link)
+
+    
+}
+
+#[derive(Subcommand, Debug)]
+enum Link {
+    Create{
+        #[clap(parse(from_os_str))]
+        path: Option<PathBuf>,
+        title: Option<String>,
+        desc: Option<String>,
+        url: Option<String>,
+    },
+    Load{
+        #[clap(parse(from_os_str))]
+        file_path: Option<PathBuf>,
+    }
 }
 
 const ARK_HOME: &str = ".ark";
@@ -170,7 +190,7 @@ fn main() {
                 "low" => PDFQuality::Low,
                 _ => panic!("unknown render option"),
             };
-            let buf = fs::read(&filepath).unwrap();
+            let buf = File::open(&filepath).unwrap();
             let dest_path = filepath.with_file_name(
                 filepath
                     .file_stem()
@@ -180,10 +200,29 @@ fn main() {
                     .to_owned()
                     + ".png",
             );
-            let img = arklib::pdf::render_preview_page(buf.as_slice(), quality);
+            let img = arklib::pdf::render_preview_page(buf, quality);
             img.save(PathBuf::from(dest_path)).unwrap();
         }
-    }
+        Command::Link(link) => {
+            match &link{
+                Link::Create { title, desc, url, path }  => {
+                    let _url = Url::parse(url.as_deref().unwrap());
+                    let mut _link: arklib::link::Link = arklib::link::Link::new(
+                        title.to_owned().unwrap(), 
+                        desc.to_owned().unwrap(),
+                        _url.unwrap()
+                    );
+                    let file_path = Path::join(path.to_owned().unwrap().as_path(), format!("{}.link",_link.format_name()));
+                    _link.write_to_path_sync(file_path.clone(), true);
+                    println!("Link saved successfully: {:?}", file_path.clone().display())
+                },
+                Link::Load {file_path} => {
+                    let link = arklib::link::Link::load(file_path.to_owned().unwrap().as_path());
+                    println!("Link data:\n{}", link.unwrap());
+                }
+            }
+        }
+    }   
 }
 
 fn build_index(root_dir: &Option<PathBuf>, interval: Option<u64>) {
