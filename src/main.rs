@@ -217,7 +217,7 @@ fn main() {
                     println!("Link saved successfully: {:?}", file_path.clone().display())
                 },
                 Link::Load {file_path} => {
-                    let link = arklib::link::Link::load(file_path.to_owned().unwrap().as_path());
+                    let link = arklib::link::Link::load_json(file_path.to_owned().unwrap().as_path());
                     println!("Link data:\n{}", link.unwrap());
                 }
             }
