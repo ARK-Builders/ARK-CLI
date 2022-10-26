@@ -115,7 +115,7 @@ fn main() {
 
                     let result = path.ancestors().find(|path| {
                         println!("\t{}", path.display());
-                        tag_storage_exists(path)
+                        storages_exists(path)
                     });
 
                     if let Some(root) = result {
@@ -130,7 +130,7 @@ fn main() {
 
             let (valid, invalid): (Vec<PathBuf>, Vec<PathBuf>) = roots
                 .into_iter()
-                .partition(|root| tag_storage_exists(&root));
+                .partition(|root| storages_exists(&root));
 
             if !invalid.is_empty() {
                 println!("These folders don't contain tag storages:");
@@ -164,7 +164,7 @@ fn main() {
                     println!("\tRoot {}", root.display());
                     let storage_backup = backup_dir.join(&i.to_string());
                     let result = copy(
-                        root.join(&arklib::TAG_STORAGE_FILENAME),
+                        root.join(&arklib::STORAGES_FOLDER),
                         storage_backup,
                     );
                     if let Err(e) = result {
@@ -250,7 +250,7 @@ fn build_index(root_dir: &Option<PathBuf>, interval: Option<u64>) {
 
     match result {
         Ok(rwlock) => {
-            println!("Success, took {:?}\n", duration);
+            println!("Build succeeded in {:?}\n", duration);
 
             if let Some(millis) = interval {
                 let mut index = rwlock.write().unwrap();
@@ -258,9 +258,13 @@ fn build_index(root_dir: &Option<PathBuf>, interval: Option<u64>) {
                     let pause = Duration::from_millis(millis);
                     thread::sleep(pause);
 
+                    let start = Instant::now();
                     match index.update() {
                         Err(msg) => println!("Oops! {}", msg),
                         Ok(diff) => {
+                            let duration = start.elapsed();
+                            println!("Updating succeeded in {:?}\n", duration);
+
                             if !diff.deleted.is_empty() {
                                 println!("Deleted: {:?}", diff.deleted);
                             }
@@ -291,8 +295,8 @@ fn home_roots_cfg() -> PathBuf {
         .join(&ROOTS_CFG_FILENAME);
 }
 
-fn tag_storage_exists(path: &Path) -> bool {
-    return File::open(path.join(&arklib::TAG_STORAGE_FILENAME)).is_ok();
+fn storages_exists(path: &Path) -> bool {
+    return File::open(path.join(&arklib::STORAGES_FOLDER)).is_ok();
 }
 
 fn parse_roots(config: File) -> Vec<PathBuf> {
