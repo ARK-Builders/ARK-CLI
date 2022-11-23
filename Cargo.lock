@@ -56,6 +56,7 @@ dependencies = [
 [[package]]
 name = "arklib"
 version = "0.1.0"
+source = "git+https://github.com/ARK-Builders/arklib?rev=fea125e#fea125e8330243522183c187a467dc762dec1fb7"
 dependencies = [
  "anyhow",
  "canonical-path",
@@ -68,6 +69,7 @@ dependencies = [
  "lazy_static",
  "libloading",
  "log",
+ "pathdiff",
  "pdfium-render",
  "reqwest",
  "scraper",
@@ -1348,6 +1350,12 @@ dependencies = [
  "rand_core 0.6.3",
  "subtle",
 ]
+
+[[package]]
+name = "pathdiff"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8835116a5c179084a830efb3adc117ab007512b535bc1a21c991d3b32a6b44dd"
 
 [[package]]
 name = "pbkdf2"
