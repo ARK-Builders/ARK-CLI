@@ -201,8 +201,6 @@ async fn main() {
                     desc.to_owned(),
                 );
 
-                // let timestamp: u64 = timestamp().as_secs();
-
                 let future = link.save(root, true);
 
                 println!("Saving link...");
