@@ -52,6 +52,7 @@ dependencies = [
  "env_logger",
  "fs_extra",
  "home",
+ "tokio",
  "url",
  "walkdir",
 ]
