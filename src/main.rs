@@ -1,5 +1,6 @@
 use std::env::current_dir;
 use std::fs::{canonicalize, create_dir_all, metadata, File};
+use std::future::Future;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -13,6 +14,9 @@ use clap::{Parser, Subcommand};
 use fs_extra::dir::{self, CopyOptions};
 use home::home_dir;
 use url::Url;
+use std::task::Poll;
+use core::pin::pin;
+use std::task::Context;
 
 #[derive(Parser, Debug)]
 #[clap(name = "ark-cli")]
@@ -76,7 +80,9 @@ const ARK_CONFIG: &str = ".config/ark";
 const ARK_BACKUPS_PATH: &str = ".ark-backups";
 const ROOTS_CFG_FILENAME: &str = "roots";
 
-fn main() {
+
+#[tokio::main]
+async fn main() {
     env_logger::init();
 
     let args = Cli::parse();
@@ -190,16 +196,23 @@ fn main() {
                 let root = provide_root(root_dir);
 
                 let url = Url::parse(url.as_deref().unwrap());
-                let mut link: arklib::link::Link = arklib::link::Link::new(
+                let link: arklib::link::Link = arklib::link::Link::new(
                     url.unwrap(),
                     title.to_owned().unwrap(),
                     desc.to_owned(),
                 );
 
-                let timestamp = timestamp().as_secs();
-                link.save(root, true) //FIXME
-                    .unwrap();
-                println!("Link saved successfully")
+                // let timestamp: u64 = timestamp().as_secs();
+
+                let future = link.save(root, true); 
+
+                println!("Saving link...");
+
+                match future.await {
+                    Ok(_) => println!("Link saved!"),
+                    Err(e) => println!("Error: {}", e),
+                }                
+
             }
 
             Link::Load {
