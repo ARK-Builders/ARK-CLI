@@ -11,12 +11,12 @@ use arklib::id::ResourceId;
 use arklib::index::ResourceIndex;
 use arklib::pdf::PDFQuality;
 use clap::{Parser, Subcommand};
+use core::pin::pin;
 use fs_extra::dir::{self, CopyOptions};
 use home::home_dir;
-use url::Url;
-use std::task::Poll;
-use core::pin::pin;
 use std::task::Context;
+use std::task::Poll;
+use url::Url;
 
 #[derive(Parser, Debug)]
 #[clap(name = "ark-cli")]
@@ -79,7 +79,6 @@ enum Link {
 const ARK_CONFIG: &str = ".config/ark";
 const ARK_BACKUPS_PATH: &str = ".ark-backups";
 const ROOTS_CFG_FILENAME: &str = "roots";
-
 
 #[tokio::main]
 async fn main() {
@@ -204,15 +203,14 @@ async fn main() {
 
                 // let timestamp: u64 = timestamp().as_secs();
 
-                let future = link.save(root, true); 
+                let future = link.save(root, true);
 
                 println!("Saving link...");
 
                 match future.await {
                     Ok(_) => println!("Link saved!"),
                     Err(e) => println!("Error: {}", e),
-                }                
-
+                }
             }
 
             Link::Load {
