@@ -203,12 +203,18 @@ async fn main() {
 
                 // let timestamp: u64 = timestamp().as_secs();
 
-                let future = link.save(root, true);
+                let future = link.save(&root, true);
 
                 println!("Saving link...");
 
                 match future.await {
-                    Ok(_) => println!("Link saved!"),
+                    Ok(_) => {
+                        println!("Link saved successfully!");
+                        match provide_index(&root).store() {
+                            Ok(_) => println!("Index stored successfully!"),
+                            Err(e) => println!("Error: {}", e),
+                        }
+                    }
                     Err(e) => println!("Error: {}", e),
                 }
             }
