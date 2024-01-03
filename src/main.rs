@@ -340,6 +340,7 @@ fn monitor_index(root_dir: &Option<PathBuf>, interval: Option<u64>) {
                     match index.update_all() {
                         Err(msg) => println!("Oops! {}", msg),
                         Ok(diff) => {
+                            index.store().expect("Could not store index");
                             let duration = start.elapsed();
                             println!("Updating succeeded in {:?}\n", duration);
 
