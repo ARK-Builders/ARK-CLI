@@ -197,8 +197,6 @@ async fn main() {
                     desc.to_owned(),
                 );
 
-
-                
                 let future = link.save(&root, true);
 
                 println!("Saving link...");
