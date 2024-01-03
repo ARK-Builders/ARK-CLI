@@ -1,6 +1,5 @@
 use std::env::current_dir;
 use std::fs::{canonicalize, create_dir_all, metadata, File};
-use std::future::Future;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -11,11 +10,8 @@ use arklib::id::ResourceId;
 use arklib::index::ResourceIndex;
 use arklib::pdf::PDFQuality;
 use clap::{Parser, Subcommand};
-use core::pin::pin;
 use fs_extra::dir::{self, CopyOptions};
 use home::home_dir;
-use std::task::Context;
-use std::task::Poll;
 use url::Url;
 
 #[derive(Parser, Debug)]
@@ -201,8 +197,8 @@ async fn main() {
                     desc.to_owned(),
                 );
 
-                // let timestamp: u64 = timestamp().as_secs();
 
+                
                 let future = link.save(&root, true);
 
                 println!("Saving link...");
