@@ -9,10 +9,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use arklib::id::ResourceId;
 use arklib::index::ResourceIndex;
 use arklib::pdf::PDFQuality;
+use arklib::{modify, AtomicFile};
 use clap::{Parser, Subcommand};
 use fs_extra::dir::{self, CopyOptions};
 use home::home_dir;
+use std::io::{Read, Result, Write};
 use url::Url;
+use walkdir::{DirEntry, WalkDir};
 
 #[derive(Parser, Debug)]
 #[clap(name = "ark-cli")]
@@ -48,6 +51,27 @@ enum Command {
 
     #[clap(subcommand)]
     Link(Link),
+
+    #[clap(subcommand)]
+    File(FileCommand),
+}
+
+#[derive(Subcommand, Debug)]
+enum FileCommand {
+    Insert {
+        #[clap(parse(from_os_str))]
+        file_path: Option<PathBuf>,
+
+        content: Option<String>,
+    },
+
+    List {
+        #[clap(parse(from_os_str))]
+        file_path: Option<PathBuf>,
+
+        #[clap(short, long)]
+        all: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -252,7 +276,84 @@ async fn main() {
                 println!("Link data:\n{:?}", link.unwrap());
             }
         },
+
+        Command::File(file) => match &file {
+            FileCommand::Insert { file_path, content } => {
+                let file_path = file_path.as_ref().unwrap();
+                let atomic_file = arklib::AtomicFile::new(file_path).unwrap();
+
+                if let Some(content) = content {
+                    modify(&atomic_file, |_| content.as_bytes().to_vec())
+                        .unwrap();
+                }
+            }
+
+            FileCommand::List { file_path, all } => {
+                if !all {
+                    let file_path = file_path.as_ref().unwrap();
+                    let file = AtomicFile::new(file_path).unwrap();
+                    if let Ok(file) = format_file(&file) {
+                        println!("{}", file);
+
+                        let files: Vec<DirEntry> = WalkDir::new(file_path)
+                            .into_iter()
+                            .filter_entry(|e| {
+                                !e.file_name()
+                                    .to_str()
+                                    .map(|s| s.starts_with('.'))
+                                    .unwrap_or(false)
+                            })
+                            .filter_map(|v| v.ok())
+                            .collect();
+
+                        println!("Versions:");
+                        for file in files {
+                            if file.file_type().is_file() {
+                                println!("      {}", file.path().display());
+                            }
+                        }
+                    } else {
+                        println!(
+                            "File {} is not a valid tag storage",
+                            file_path.display()
+                        );
+                    }
+                } else {
+                    // walk through all files recursivelty in the folder and store them in a vector called files
+
+                    let files: Vec<AtomicFile> =
+                        WalkDir::new(file_path.as_ref().unwrap())
+                            .into_iter()
+                            .filter_entry(|e| {
+                                !e.file_name()
+                                    .to_str()
+                                    .map(|s| s.starts_with('.'))
+                                    .unwrap_or(false)
+                                    && e.file_type().is_dir()
+                            })
+                            .filter_map(|v| v.ok())
+                            .filter_map(|e| match AtomicFile::new(e.path()) {
+                                Ok(file) => Some(file),
+                                Err(_) => None,
+                            })
+                            .collect();
+
+                    for file in files {
+                        if let Ok(file) = format_file(&file) {
+                            println!("{}", file);
+                        }
+                    }
+                }
+            }
+        },
     }
+}
+
+fn format_file(file: &AtomicFile) -> Result<String> {
+    let current = file.load()?;
+    let data = current.read_to_string()?;
+    // !TODO: add version number when arklib is updated
+    Ok(format!("FILE {} V5 : {}", "./path/here", data))
 }
 
 fn discover_roots(roots_cfg: &Option<PathBuf>) -> Vec<PathBuf> {
