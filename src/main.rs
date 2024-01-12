@@ -421,8 +421,6 @@ async fn main() {
 fn format_file(file: &AtomicFile) -> Result<String> {
     let current = file.load()?;
     let data = current.read_to_string()?;
-    // !TODO: add version number when arklib is updated
-
     let mut split = current
         .path
         .file_name()
