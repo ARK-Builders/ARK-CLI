@@ -1,15 +1,20 @@
-use std::env::current_dir;
+use std::env::{self, current_dir};
 use std::fs::{canonicalize, create_dir_all, metadata, File};
 use std::io::prelude::*;
 use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::path::{Display, Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use arklib::id::ResourceId;
+use arklib::id::{app_id, ResourceId};
 use arklib::index::ResourceIndex;
 use arklib::pdf::PDFQuality;
-use arklib::{modify, AtomicFile};
+use arklib::{
+    modify, AtomicFile, ARK_FOLDER, DEVICE_ID, FAVORITES_FILE, INDEX_PATH,
+    METADATA_STORAGE_FOLDER, PREVIEWS_STORAGE_FOLDER,
+    PROPERTIES_STORAGE_FOLDER, SCORE_STORAGE_FILE, STATS_FOLDER,
+    TAG_STORAGE_FILE, THUMBNAILS_STORAGE_FOLDER,
+};
 use clap::{Parser, Subcommand};
 use fs_extra::dir::{self, CopyOptions};
 use home::home_dir;
@@ -67,7 +72,7 @@ enum FileCommand {
 
     List {
         #[clap(parse(from_os_str))]
-        file_path: Option<PathBuf>,
+        storage: Option<PathBuf>,
 
         #[clap(short, long)]
         all: bool,
@@ -105,6 +110,17 @@ async fn main() {
     env_logger::init();
 
     let args = Cli::parse();
+
+    let temp_dir = std::env::temp_dir();
+    let ark_dir = temp_dir.join(".ark");
+    if !ark_dir.exists() {
+        std::fs::create_dir(&ark_dir).unwrap();
+    }
+    println!("Loading app id at {}...", ark_dir.display());
+    let _ = app_id::load(ark_dir).map_err(|e| {
+        println!("Couldn't load app id: {}", e);
+        std::process::exit(1);
+    });
 
     match &args.command {
         Command::Backup { roots_cfg } => {
@@ -288,55 +304,108 @@ async fn main() {
                 }
             }
 
-            FileCommand::List { file_path, all } => {
+            FileCommand::List { storage, all } => {
+                let root = provide_root(&None);
+                let storage = storage.as_ref().unwrap_or(&root);
+
                 if !all {
-                    let file_path = file_path.as_ref().unwrap();
-                    let file = AtomicFile::new(file_path).unwrap();
+                    let file_path = if storage.exists() {
+                        Some(storage.clone())
+                    } else {
+                        match storage
+                            .clone()
+                            .into_os_string()
+                            .into_string()
+                            .unwrap()
+                            .to_lowercase()
+                            .as_str()
+                        {
+                            "favorites" => Some(
+                                provide_root(&None)
+                                    .join(ARK_FOLDER)
+                                    .join(FAVORITES_FILE),
+                            ),
+                            "device" => Some(
+                                provide_root(&None)
+                                    .join(ARK_FOLDER)
+                                    .join(DEVICE_ID),
+                            ),
+                            "tage" => Some(
+                                provide_root(&None)
+                                    .join(ARK_FOLDER)
+                                    .join(TAG_STORAGE_FILE),
+                            ),
+                            "score" => Some(
+                                provide_root(&None)
+                                    .join(ARK_FOLDER)
+                                    .join(SCORE_STORAGE_FILE),
+                            ),
+
+                            _ => None,
+                        }
+                    }
+                    .expect("Could not find storage folder");
+
+                    let file = AtomicFile::new(&file_path).unwrap();
                     if let Ok(file) = format_file(&file) {
                         println!("{}", file);
-
-                        let files: Vec<DirEntry> = WalkDir::new(file_path)
-                            .into_iter()
-                            .filter_entry(|e| {
-                                !e.file_name()
-                                    .to_str()
-                                    .map(|s| s.starts_with('.'))
-                                    .unwrap_or(false)
-                            })
-                            .filter_map(|v| v.ok())
-                            .collect();
-
-                        println!("Versions:");
-                        for file in files {
-                            if file.file_type().is_file() {
-                                println!("      {}", file.path().display());
-                            }
-                        }
                     } else {
                         println!(
-                            "File {} is not a valid tag storage",
+                            "FILE: {} is not a valid atomic file",
                             file_path.display()
                         );
                     }
                 } else {
-                    // walk through all files recursivelty in the folder and store them in a vector called files
+                    let file_path = if storage.exists() {
+                        Some(storage.clone())
+                    } else {
+                        match storage
+                            .clone()
+                            .into_os_string()
+                            .into_string()
+                            .unwrap()
+                            .to_lowercase()
+                            .as_str()
+                        {
+                            "stats" => Some(
+                                provide_root(&None)
+                                    .join(ARK_FOLDER)
+                                    .join(STATS_FOLDER),
+                            ),
+                            "properties" => Some(
+                                provide_root(&None)
+                                    .join(ARK_FOLDER)
+                                    .join(PROPERTIES_STORAGE_FOLDER),
+                            ),
+                            "metadata" => Some(
+                                provide_root(&None)
+                                    .join(ARK_FOLDER)
+                                    .join(METADATA_STORAGE_FOLDER),
+                            ),
+                            "previews" => Some(
+                                provide_root(&None)
+                                    .join(ARK_FOLDER)
+                                    .join(PREVIEWS_STORAGE_FOLDER),
+                            ),
+                            "thumbnails" => Some(
+                                provide_root(&None)
+                                    .join(ARK_FOLDER)
+                                    .join(THUMBNAILS_STORAGE_FOLDER),
+                            ),
+                            _ => None,
+                        }
+                    }
+                    .expect("Could not find storage folder");
 
-                    let files: Vec<AtomicFile> =
-                        WalkDir::new(file_path.as_ref().unwrap())
-                            .into_iter()
-                            .filter_entry(|e| {
-                                !e.file_name()
-                                    .to_str()
-                                    .map(|s| s.starts_with('.'))
-                                    .unwrap_or(false)
-                                    && e.file_type().is_dir()
-                            })
-                            .filter_map(|v| v.ok())
-                            .filter_map(|e| match AtomicFile::new(e.path()) {
-                                Ok(file) => Some(file),
-                                Err(_) => None,
-                            })
-                            .collect();
+                    let files: Vec<AtomicFile> = WalkDir::new(file_path)
+                        .into_iter()
+                        .filter_entry(|e| e.file_type().is_dir())
+                        .filter_map(|v| v.ok())
+                        .filter_map(|e| match AtomicFile::new(e.path()) {
+                            Ok(file) => Some(file),
+                            Err(_) => None,
+                        })
+                        .collect();
 
                     for file in files {
                         if let Ok(file) = format_file(&file) {
@@ -353,7 +422,22 @@ fn format_file(file: &AtomicFile) -> Result<String> {
     let current = file.load()?;
     let data = current.read_to_string()?;
     // !TODO: add version number when arklib is updated
-    Ok(format!("FILE {} V5 : {}", "./path/here", data))
+
+    let mut split = current
+        .path
+        .file_name()
+        .expect("Not a file")
+        .to_str()
+        .unwrap()
+        .split("_");
+
+    Ok(format!(
+        "{}: [{} - {}]: {}",
+        current.version,
+        split.next().unwrap(),
+        split.next().unwrap(),
+        data
+    ))
 }
 
 fn discover_roots(roots_cfg: &Option<PathBuf>) -> Vec<PathBuf> {
