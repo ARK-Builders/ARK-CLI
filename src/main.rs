@@ -326,7 +326,7 @@ async fn main() {
                                     .join(ARK_FOLDER)
                                     .join(FAVORITES_FILE),
                             ),
-                            "device" => Some(
+                            "app-id" => Some(
                                 provide_root(&None)
                                     .join(ARK_FOLDER)
                                     .join(APP_ID_FILE),
