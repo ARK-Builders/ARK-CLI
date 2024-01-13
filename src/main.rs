@@ -321,7 +321,6 @@ async fn main() {
                             .to_lowercase()
                             .as_str()
                         {
-                            // TODO properties?
                             "favorites" => Some(
                                 provide_root(&None)
                                     .join(ARK_FOLDER)
