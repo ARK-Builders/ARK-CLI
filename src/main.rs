@@ -1,16 +1,17 @@
-use std::env::{self, current_dir};
+use std::env::current_dir;
 use std::fs::{canonicalize, create_dir_all, metadata, File};
 use std::io::prelude::*;
 use std::io::BufReader;
-use std::path::{Display, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use arklib::id::{app_id, ResourceId};
+use arklib::app_id;
+use arklib::id::ResourceId;
 use arklib::index::ResourceIndex;
 use arklib::pdf::PDFQuality;
 use arklib::{
-    modify, AtomicFile, ARK_FOLDER, DEVICE_ID, FAVORITES_FILE, INDEX_PATH,
+    modify, AtomicFile, APP_ID_FILE, ARK_FOLDER, FAVORITES_FILE,
     METADATA_STORAGE_FOLDER, PREVIEWS_STORAGE_FOLDER,
     PROPERTIES_STORAGE_FOLDER, SCORE_STORAGE_FILE, STATS_FOLDER,
     TAG_STORAGE_FILE, THUMBNAILS_STORAGE_FOLDER,
@@ -18,9 +19,9 @@ use arklib::{
 use clap::{Parser, Subcommand};
 use fs_extra::dir::{self, CopyOptions};
 use home::home_dir;
-use std::io::{Read, Result, Write};
+use std::io::{Result, Write};
 use url::Url;
-use walkdir::{DirEntry, WalkDir};
+use walkdir::WalkDir;
 
 #[derive(Parser, Debug)]
 #[clap(name = "ark-cli")]
@@ -320,6 +321,7 @@ async fn main() {
                             .to_lowercase()
                             .as_str()
                         {
+                            // TODO properties?
                             "favorites" => Some(
                                 provide_root(&None)
                                     .join(ARK_FOLDER)
@@ -328,14 +330,14 @@ async fn main() {
                             "device" => Some(
                                 provide_root(&None)
                                     .join(ARK_FOLDER)
-                                    .join(DEVICE_ID),
+                                    .join(APP_ID_FILE),
                             ),
-                            "tage" => Some(
+                            "tags" => Some(
                                 provide_root(&None)
                                     .join(ARK_FOLDER)
                                     .join(TAG_STORAGE_FILE),
                             ),
-                            "score" => Some(
+                            "scores" => Some(
                                 provide_root(&None)
                                     .join(ARK_FOLDER)
                                     .join(SCORE_STORAGE_FILE),
