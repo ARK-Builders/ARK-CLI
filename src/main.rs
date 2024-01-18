@@ -3,6 +3,7 @@ use std::fs::{canonicalize, create_dir_all, metadata, File};
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::path::{Display, Path, PathBuf};
+use std::str::FromStr;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -10,7 +11,7 @@ use arklib::id::{app_id, ResourceId};
 use arklib::index::ResourceIndex;
 use arklib::pdf::PDFQuality;
 use arklib::{
-    modify, AtomicFile, ARK_FOLDER, DEVICE_ID, FAVORITES_FILE, INDEX_PATH,
+    modify, modify_json, AtomicFile, ARK_FOLDER, DEVICE_ID, FAVORITES_FILE,
     METADATA_STORAGE_FOLDER, PREVIEWS_STORAGE_FOLDER,
     PROPERTIES_STORAGE_FOLDER, SCORE_STORAGE_FILE, STATS_FOLDER,
     TAG_STORAGE_FILE, THUMBNAILS_STORAGE_FOLDER,
@@ -18,9 +19,9 @@ use arklib::{
 use clap::{Parser, Subcommand};
 use fs_extra::dir::{self, CopyOptions};
 use home::home_dir;
-use std::io::{Read, Result, Write};
+use std::io::{Result, Write};
 use url::Url;
-use walkdir::{DirEntry, WalkDir};
+use walkdir::WalkDir;
 
 #[derive(Parser, Debug)]
 #[clap(name = "ark-cli")]
@@ -28,6 +29,46 @@ use walkdir::{DirEntry, WalkDir};
 struct Cli {
     #[clap(subcommand)]
     command: Command,
+}
+
+#[derive(Debug)]
+enum InsertContent {
+    Values(Vec<(String, String)>),
+    String(String),
+}
+
+impl FromStr for InsertContent {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let pairs: Vec<&str> = s.split(',').collect();
+
+        if pairs.len() == 1 {
+            let key_value: Vec<&str> = pairs[0].split(':').collect();
+            if key_value.len() == 2 {
+                let key = key_value[0].trim().to_string();
+                let value = key_value[1].trim().to_string();
+                return Ok(InsertContent::Values(vec![(key, value)]));
+            } else {
+                return Ok(InsertContent::String(s.to_string()));
+            }
+        }
+
+        let mut values = Vec::new();
+
+        for pair in pairs {
+            let key_value: Vec<&str> = pair.split(':').collect();
+            if key_value.len() == 2 {
+                let key = key_value[0].trim().to_string();
+                let value = key_value[1].trim().to_string();
+                values.push((key, value));
+            } else {
+                return Err("Invalid key-value pair format");
+            }
+        }
+
+        Ok(InsertContent::Values(values))
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -63,11 +104,23 @@ enum Command {
 
 #[derive(Subcommand, Debug)]
 enum FileCommand {
+    Append {
+        #[clap(parse(from_os_str))]
+        storage: Option<PathBuf>,
+
+        content: Option<InsertContent>,
+    },
+
     Insert {
         #[clap(parse(from_os_str))]
-        file_path: Option<PathBuf>,
+        storage: Option<PathBuf>,
 
-        content: Option<String>,
+        content: Option<InsertContent>,
+    },
+
+    Read {
+        #[clap(parse(from_os_str))]
+        storage: Option<PathBuf>,
     },
 
     List {
@@ -111,8 +164,8 @@ async fn main() {
 
     let args = Cli::parse();
 
-    let temp_dir = std::env::temp_dir();
-    let ark_dir = temp_dir.join(".ark");
+    let app_id_dir = home_dir().expect("Couldn't retrieve home directory!");
+    let ark_dir = app_id_dir.join(".ark");
     if !ark_dir.exists() {
         std::fs::create_dir(&ark_dir).unwrap();
     }
@@ -294,60 +347,104 @@ async fn main() {
         },
 
         Command::File(file) => match &file {
-            FileCommand::Insert { file_path, content } => {
-                let file_path = file_path.as_ref().unwrap();
+            FileCommand::Append { storage, content } => {
+                let root = provide_root(&None);
+                let storage = storage.as_ref().unwrap_or(&root);
+                let file_path = get_storage_from_path(storage)
+                    .expect("Could not find storage folder");
+
                 let atomic_file = arklib::AtomicFile::new(file_path).unwrap();
 
                 if let Some(content) = content {
-                    modify(&atomic_file, |_| content.as_bytes().to_vec())
-                        .unwrap();
+                    match content {
+                        InsertContent::String(content) => {
+                            modify(&atomic_file, |current| {
+                                let mut combined_vec: Vec<u8> =
+                                    current.to_vec();
+                                combined_vec
+                                    .extend_from_slice(content.as_bytes());
+                                combined_vec
+                            })
+                            .expect("Could not append string")
+                        }
+                        InsertContent::Values(values) => {
+                            append_json(&atomic_file, values.to_vec())
+                                .expect("Could not append json");
+                        }
+                    }
+                } else {
+                    println!("Provide content to insert");
+                }
+            }
+
+            FileCommand::Insert { storage, content } => {
+                let root = provide_root(&None);
+                let storage = storage.as_ref().unwrap_or(&root);
+                let file_path = get_storage_from_path(storage)
+                    .expect("Could not find storage folder");
+
+                let atomic_file = arklib::AtomicFile::new(file_path).unwrap();
+
+                if let Some(content) = content {
+                    match content {
+                        InsertContent::String(content) => {
+                            modify(&atomic_file, |_| {
+                                content.as_bytes().to_vec()
+                            })
+                            .expect("Could not insert string");
+                        }
+                        InsertContent::Values(values) => {
+                            modify_json(
+                                &atomic_file,
+                                |current: &mut Option<serde_json::Value>| {
+                                    let mut new = serde_json::Map::new();
+                                    for (key, value) in values {
+                                        new.insert(
+                                            key.clone(),
+                                            serde_json::Value::String(
+                                                value.clone(),
+                                            ),
+                                        );
+                                    }
+                                    *current =
+                                        Some(serde_json::Value::Object(new));
+                                },
+                            )
+                            .expect("Could not insert json");
+                        }
+                    }
+                } else {
+                    println!("Provide content to insert");
+                }
+            }
+
+            FileCommand::Read { storage } => {
+                let root = provide_root(&None);
+                let storage = storage.as_ref().unwrap_or(&root);
+                let file_path = get_storage_from_path(storage)
+                    .expect("Could not find storage folder");
+
+                let atomic_file = arklib::AtomicFile::new(&file_path).unwrap();
+
+                if let Some(file) = format_file(&atomic_file, true) {
+                    println!("{}", file);
+                } else {
+                    println!(
+                        "FILE: {} is not a valid atomic file",
+                        file_path.display()
+                    );
                 }
             }
 
             FileCommand::List { storage, all } => {
                 let root = provide_root(&None);
                 let storage = storage.as_ref().unwrap_or(&root);
-
-                if !all {
-                    let file_path = if storage.exists() {
-                        Some(storage.clone())
-                    } else {
-                        match storage
-                            .clone()
-                            .into_os_string()
-                            .into_string()
-                            .unwrap()
-                            .to_lowercase()
-                            .as_str()
-                        {
-                            "favorites" => Some(
-                                provide_root(&None)
-                                    .join(ARK_FOLDER)
-                                    .join(FAVORITES_FILE),
-                            ),
-                            "device" => Some(
-                                provide_root(&None)
-                                    .join(ARK_FOLDER)
-                                    .join(DEVICE_ID),
-                            ),
-                            "tage" => Some(
-                                provide_root(&None)
-                                    .join(ARK_FOLDER)
-                                    .join(TAG_STORAGE_FILE),
-                            ),
-                            "score" => Some(
-                                provide_root(&None)
-                                    .join(ARK_FOLDER)
-                                    .join(SCORE_STORAGE_FILE),
-                            ),
-
-                            _ => None,
-                        }
-                    }
+                let file_path = get_storage_from_path(storage)
                     .expect("Could not find storage folder");
 
+                if !all {
                     let file = AtomicFile::new(&file_path).unwrap();
-                    if let Ok(file) = format_file(&file) {
+                    if let Some(file) = format_file(&file, false) {
                         println!("{}", file);
                     } else {
                         println!(
@@ -356,47 +453,6 @@ async fn main() {
                         );
                     }
                 } else {
-                    let file_path = if storage.exists() {
-                        Some(storage.clone())
-                    } else {
-                        match storage
-                            .clone()
-                            .into_os_string()
-                            .into_string()
-                            .unwrap()
-                            .to_lowercase()
-                            .as_str()
-                        {
-                            "stats" => Some(
-                                provide_root(&None)
-                                    .join(ARK_FOLDER)
-                                    .join(STATS_FOLDER),
-                            ),
-                            "properties" => Some(
-                                provide_root(&None)
-                                    .join(ARK_FOLDER)
-                                    .join(PROPERTIES_STORAGE_FOLDER),
-                            ),
-                            "metadata" => Some(
-                                provide_root(&None)
-                                    .join(ARK_FOLDER)
-                                    .join(METADATA_STORAGE_FOLDER),
-                            ),
-                            "previews" => Some(
-                                provide_root(&None)
-                                    .join(ARK_FOLDER)
-                                    .join(PREVIEWS_STORAGE_FOLDER),
-                            ),
-                            "thumbnails" => Some(
-                                provide_root(&None)
-                                    .join(ARK_FOLDER)
-                                    .join(THUMBNAILS_STORAGE_FOLDER),
-                            ),
-                            _ => None,
-                        }
-                    }
-                    .expect("Could not find storage folder");
-
                     let files: Vec<AtomicFile> = WalkDir::new(file_path)
                         .into_iter()
                         .filter_entry(|e| e.file_type().is_dir())
@@ -408,7 +464,7 @@ async fn main() {
                         .collect();
 
                     for file in files {
-                        if let Ok(file) = format_file(&file) {
+                        if let Some(file) = format_file(&file, false) {
                             println!("{}", file);
                         }
                     }
@@ -418,9 +474,121 @@ async fn main() {
     }
 }
 
-fn format_file(file: &AtomicFile) -> Result<String> {
-    let current = file.load()?;
-    let data = current.read_to_string()?;
+pub fn append_json(
+    atomic_file: &AtomicFile,
+    data: Vec<(String, String)>,
+) -> Result<()> {
+    modify_json(&atomic_file, |current: &mut Option<serde_json::Value>| {
+        let current_data = match current {
+            Some(current) => {
+                if let Ok(value) = serde_json::to_value(current) {
+                    match value {
+                        serde_json::Value::Object(map) => Some(map),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
+
+            None => None,
+        };
+        let mut new = serde_json::Map::new();
+
+        if let None = current_data {
+            for (key, value) in &data {
+                new.insert(
+                    key.clone(),
+                    serde_json::Value::String(value.clone()),
+                );
+            }
+            *current = Some(serde_json::Value::Object(new));
+        } else if let Some(values) = current_data {
+            for (key, value) in &values {
+                new.insert(key.clone(), value.clone());
+            }
+
+            for (key, value) in &data {
+                new.insert(
+                    key.clone(),
+                    serde_json::Value::String(value.clone()),
+                );
+            }
+            *current = Some(serde_json::Value::Object(new));
+        }
+    })
+}
+
+fn get_storage_from_path(storage: &PathBuf) -> Option<PathBuf> {
+    if storage.exists() {
+        Some(storage.clone())
+    } else {
+        match storage
+            .clone()
+            .into_os_string()
+            .into_string()
+            .unwrap()
+            .to_lowercase()
+            .as_str()
+        {
+            "favorites" => Some(
+                provide_root(&None)
+                    .join(ARK_FOLDER)
+                    .join(FAVORITES_FILE),
+            ),
+            "device" => Some(
+                provide_root(&None)
+                    .join(ARK_FOLDER)
+                    .join(DEVICE_ID),
+            ),
+            "tage" => Some(
+                provide_root(&None)
+                    .join(ARK_FOLDER)
+                    .join(TAG_STORAGE_FILE),
+            ),
+            "score" => Some(
+                provide_root(&None)
+                    .join(ARK_FOLDER)
+                    .join(SCORE_STORAGE_FILE),
+            ),
+            "stats" => Some(
+                provide_root(&None)
+                    .join(ARK_FOLDER)
+                    .join(STATS_FOLDER),
+            ),
+            "properties" => Some(
+                provide_root(&None)
+                    .join(ARK_FOLDER)
+                    .join(PROPERTIES_STORAGE_FOLDER),
+            ),
+            "metadata" => Some(
+                provide_root(&None)
+                    .join(ARK_FOLDER)
+                    .join(METADATA_STORAGE_FOLDER),
+            ),
+            "previews" => Some(
+                provide_root(&None)
+                    .join(ARK_FOLDER)
+                    .join(PREVIEWS_STORAGE_FOLDER),
+            ),
+            "thumbnails" => Some(
+                provide_root(&None)
+                    .join(ARK_FOLDER)
+                    .join(THUMBNAILS_STORAGE_FOLDER),
+            ),
+
+            _ => None,
+        }
+    }
+}
+
+fn format_file(file: &AtomicFile, show_content: bool) -> Option<String> {
+    let current = file.load().ok()?;
+
+    if current.version == 0 {
+        return None;
+    }
+
     let mut split = current
         .path
         .file_name()
@@ -429,13 +597,26 @@ fn format_file(file: &AtomicFile) -> Result<String> {
         .unwrap()
         .split("_");
 
-    Ok(format!(
-        "{}: [{} - {}]: {}",
+    let mut output = format!(
+        "{}: [{} - {}]",
         current.version,
         split.next().unwrap(),
-        split.next().unwrap(),
-        data
-    ))
+        split.next().unwrap()
+    );
+
+    if show_content {
+        let data = current.read_to_string().ok()?;
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+            output.push_str(&format!(
+                "\n\n{}",
+                serde_json::to_string_pretty(&json).unwrap()
+            ));
+        } else {
+            output.push_str(&format!("\n\n{}", data));
+        }
+    }
+
+    Some(output)
 }
 
 fn discover_roots(roots_cfg: &Option<PathBuf>) -> Vec<PathBuf> {

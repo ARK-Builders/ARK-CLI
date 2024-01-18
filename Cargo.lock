@@ -52,6 +52,8 @@ dependencies = [
  "env_logger",
  "fs_extra",
  "home",
+ "serde",
+ "serde_json",
  "tokio",
  "url",
  "walkdir",
