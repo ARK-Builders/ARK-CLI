@@ -2,7 +2,7 @@ use std::env::current_dir;
 use std::fs::{canonicalize, create_dir_all, metadata, File};
 use std::io::prelude::*;
 use std::io::BufReader;
-use std::path::{Display, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -351,7 +351,7 @@ async fn main() {
             FileCommand::Append { storage, content } => {
                 let root = provide_root(&None);
                 let storage = storage.as_ref().unwrap_or(&root);
-                let file_path = get_storage_from_path(storage)
+                let file_path = get_storage_by_name(storage)
                     .expect("Could not find storage folder");
 
                 let atomic_file = arklib::AtomicFile::new(file_path).unwrap();
@@ -381,7 +381,7 @@ async fn main() {
             FileCommand::Insert { storage, content } => {
                 let root = provide_root(&None);
                 let storage = storage.as_ref().unwrap_or(&root);
-                let file_path = get_storage_from_path(storage)
+                let file_path = get_storage_by_name(storage)
                     .expect("Could not find storage folder");
 
                 let atomic_file = arklib::AtomicFile::new(file_path).unwrap();
@@ -422,7 +422,7 @@ async fn main() {
             FileCommand::Read { storage } => {
                 let root = provide_root(&None);
                 let storage = storage.as_ref().unwrap_or(&root);
-                let file_path = get_storage_from_path(storage)
+                let file_path = get_storage_by_name(storage)
                     .expect("Could not find storage folder");
 
                 let atomic_file = arklib::AtomicFile::new(&file_path).unwrap();
@@ -440,7 +440,7 @@ async fn main() {
             FileCommand::List { storage, all } => {
                 let root = provide_root(&None);
                 let storage = storage.as_ref().unwrap_or(&root);
-                let file_path = get_storage_from_path(storage)
+                let file_path = get_storage_by_name(storage)
                     .expect("Could not find storage folder");
 
                 if !all {
@@ -520,7 +520,7 @@ pub fn append_json(
     })
 }
 
-fn get_storage_from_path(storage: &PathBuf) -> Option<PathBuf> {
+fn get_storage_by_name(storage: &PathBuf) -> Option<PathBuf> {
     if storage.exists() {
         Some(storage.clone())
     } else {
