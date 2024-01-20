@@ -88,13 +88,15 @@ enum FileCommand {
 
     Read {
         storage: String,
+
+        key: Option<String>,
     },
 
     List {
         storage: String,
 
         #[clap(short, long)]
-        all: bool,
+        versions: bool,
     },
 }
 
@@ -347,99 +349,34 @@ async fn main() {
                 }
             }
 
-            FileCommand::Read { storage } => {
+            FileCommand::Read { storage, key } => {
                 let file_path = translate_storage(storage)
                     .expect("ERROR: Could not find storage folder");
 
                 let atomic_file = AtomicFile::new(&file_path)
                     .expect("ERROR: Could not create atomic file");
 
-                if let Some(file) = format_file(&atomic_file, true) {
-                    println!("{}", file);
-                } else {
-                    println!("FILE: {} is not a valid atomic file", storage);
+                match commands::file::file_read(&atomic_file, key) {
+                    Ok(output) => {
+                        println!("{}", output);
+                    }
+                    Err(e) => println!("ERROR: {}", e),
                 }
             }
 
-            FileCommand::List { storage, all } => {
+            FileCommand::List { storage, versions } => {
                 let file_path = translate_storage(storage)
                     .expect("ERROR: Could not find storage folder");
 
-                if !all {
-                    let file: AtomicFile = AtomicFile::new(&file_path).unwrap();
-                    if let Some(file) = format_file(&file, false) {
-                        println!("{}", file);
-                    } else {
-                        println!(
-                            "FILE: {} is not a valid atomic file",
-                            file_path.display()
-                        );
+                match commands::file::file_list(file_path, versions) {
+                    Ok(output) => {
+                        println!("{}", output);
                     }
-                } else {
-                    let files: Vec<AtomicFile> = WalkDir::new(file_path)
-                        .into_iter()
-                        .filter_entry(|e| e.file_type().is_dir())
-                        .filter_map(|v| v.ok())
-                        .filter_map(|e| match AtomicFile::new(e.path()) {
-                            Ok(file) => Some(file),
-                            Err(_) => None,
-                        })
-                        .collect();
-
-                    for file in files {
-                        if let Some(file) = format_file(&file, false) {
-                            println!("{}", file);
-                        }
-                    }
+                    Err(e) => println!("ERROR: {}", e),
                 }
             }
         },
     }
-}
-
-pub fn append_json(
-    atomic_file: &AtomicFile,
-    data: Vec<(String, String)>,
-) -> Result<()> {
-    modify_json(&atomic_file, |current: &mut Option<serde_json::Value>| {
-        let current_data = match current {
-            Some(current) => {
-                if let Ok(value) = serde_json::to_value(current) {
-                    match value {
-                        serde_json::Value::Object(map) => Some(map),
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            }
-
-            None => None,
-        };
-        let mut new = serde_json::Map::new();
-
-        if let None = current_data {
-            for (key, value) in &data {
-                new.insert(
-                    key.clone(),
-                    serde_json::Value::String(value.clone()),
-                );
-            }
-            *current = Some(serde_json::Value::Object(new));
-        } else if let Some(values) = current_data {
-            for (key, value) in &values {
-                new.insert(key.clone(), value.clone());
-            }
-
-            for (key, value) in &data {
-                new.insert(
-                    key.clone(),
-                    serde_json::Value::String(value.clone()),
-                );
-            }
-            *current = Some(serde_json::Value::Object(new));
-        }
-    })
 }
 
 fn translate_storage(storage: &String) -> Option<PathBuf> {
@@ -500,43 +437,6 @@ fn translate_storage(storage: &String) -> Option<PathBuf> {
         _ => None,
     }
     .filter(|path| path.exists() && path.is_dir())
-}
-
-fn format_file(file: &AtomicFile, show_content: bool) -> Option<String> {
-    let current = file.load().ok()?;
-
-    if current.version == 0 {
-        return None;
-    }
-
-    let mut split = current
-        .path
-        .file_name()
-        .expect("Not a file")
-        .to_str()
-        .unwrap()
-        .split("_");
-
-    let mut output = format!(
-        "{}: [{} - {}]",
-        current.version,
-        split.next().unwrap(),
-        split.next().unwrap()
-    );
-
-    if show_content {
-        let data = current.read_to_string().ok()?;
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
-            output.push_str(&format!(
-                "\n\n{}",
-                serde_json::to_string_pretty(&json).unwrap()
-            ));
-        } else {
-            output.push_str(&format!("\n\n{}", data));
-        }
-    }
-
-    Some(output)
 }
 
 fn discover_roots(roots_cfg: &Option<PathBuf>) -> Vec<PathBuf> {
