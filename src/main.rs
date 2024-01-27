@@ -12,20 +12,22 @@ use arklib::id::ResourceId;
 use arklib::index::ResourceIndex;
 use arklib::pdf::PDFQuality;
 use arklib::{
-    modify, modify_json, AtomicFile, APP_ID_FILE, ARK_FOLDER, FAVORITES_FILE,
-    METADATA_STORAGE_FOLDER, PREVIEWS_STORAGE_FOLDER,
+    ARK_FOLDER, METADATA_STORAGE_FOLDER, PREVIEWS_STORAGE_FOLDER,
     PROPERTIES_STORAGE_FOLDER, SCORE_STORAGE_FILE, STATS_FOLDER,
     TAG_STORAGE_FILE, THUMBNAILS_STORAGE_FOLDER,
 };
 use clap::{Parser, Subcommand};
 use fs_extra::dir::{self, CopyOptions};
 use home::home_dir;
-use std::io::{Result, Write};
-use url::Url;
-use walkdir::WalkDir;
+use std::io::Write;
+use storage::StorageType;
+
+use crate::parsers::Format;
+use crate::storage::Storage;
 
 mod commands;
 mod parsers;
+mod storage;
 
 #[derive(Parser, Debug)]
 #[clap(name = "ark-cli")]
@@ -71,25 +73,38 @@ enum FileCommand {
     Append {
         storage: String,
 
-        content: Option<String>,
+        id: String,
+
+        content: String,
 
         #[clap(short, long)]
         format: Option<String>,
+
+        #[clap(short, long)]
+        type_: Option<String>,
     },
 
     Insert {
         storage: String,
 
-        content: Option<String>,
+        id: String,
+
+        content: String,
 
         #[clap(short, long)]
         format: Option<String>,
+
+        #[clap(short, long)]
+        type_: Option<String>,
     },
 
     Read {
         storage: String,
 
-        key: Option<String>,
+        id: String,
+
+        #[clap(short, long)]
+        type_: Option<String>,
     },
 
     List {
@@ -97,6 +112,9 @@ enum FileCommand {
 
         #[clap(short, long)]
         versions: bool,
+
+        #[clap(short, long)]
+        type_: Option<String>,
     },
 }
 
@@ -292,151 +310,183 @@ async fn main() {
         Command::File(file) => match &file {
             FileCommand::Append {
                 storage,
+                id,
                 content,
                 format,
+                type_,
             } => {
-                let file_path = translate_storage(storage)
+                let (file_path, storage_type) = translate_storage(storage)
                     .expect("ERROR: Could not find storage folder");
 
-                let atomic_file = AtomicFile::new(&file_path)
-                    .expect("ERROR: Could not create atomic file");
+                let storage_type = storage_type.unwrap_or(match type_ {
+                    Some(type_) => match type_.to_lowercase().as_str() {
+                        "file" => StorageType::File,
+                        "folder" => StorageType::Folder,
+                        _ => panic!("unknown storage type"),
+                    },
+                    None => StorageType::File,
+                });
 
-                let format = parsers::get_format(&format)
-                    .expect("ERROR: Format must be either 'json' or 'raw'");
+                let format =
+                    parsers::get_format(&format).unwrap_or(Format::Raw);
 
-                let content = content
-                    .as_ref()
-                    .expect("ERROR: Content was not provided");
+                let mut storage = Storage::new(file_path, storage_type)
+                    .expect("ERROR: Could not create storage");
 
-                commands::file::file_append(&atomic_file, content, format)
-                    .map_err(|e| println!("ERROR: {}", e))
+                let resource_id = ResourceId::from_str(id)
+                    .expect("ERROR: Could not parse id");
+
+                storage
+                    .append(resource_id, content, format)
                     .unwrap();
             }
 
             FileCommand::Insert {
                 storage,
+                id,
                 content,
                 format,
+                type_,
             } => {
-                let file_path = match translate_storage(storage) {
-                    Some(path) => path,
-                    None => {
-                        let path = PathBuf::from_str(storage)
-                            .expect("ERROR: Could not create storage path");
-                        create_dir_all(&path).expect(
-                            "ERROR: Could not create storage directory",
-                        );
-                        path
-                    }
-                };
+                let (file_path, storage_type) = translate_storage(storage)
+                    .expect("ERROR: Could not find storage folder");
 
-                let atomic_file = AtomicFile::new(&file_path)
-                    .expect("ERROR: Could not create atomic file");
+                let storage_type = storage_type.unwrap_or(match type_ {
+                    Some(type_) => match type_.to_lowercase().as_str() {
+                        "file" => StorageType::File,
+                        "folder" => StorageType::Folder,
+                        _ => panic!("unknown storage type"),
+                    },
+                    None => StorageType::File,
+                });
 
-                let format = parsers::get_format(&format)
-                    .expect("ERROR: Format must be either 'json' or 'raw'");
+                let format =
+                    parsers::get_format(&format).unwrap_or(Format::Raw);
 
-                let content = content
-                    .as_ref()
-                    .expect("ERROR: Content was not provided");
+                let mut storage = Storage::new(file_path, storage_type)
+                    .expect("ERROR: Could not create storage");
 
-                match commands::file::file_insert(&atomic_file, content, format)
-                {
-                    Ok(_) => {
-                        println!("File inserted successfully!");
-                    }
+                let resource_id = ResourceId::from_str(id)
+                    .expect("ERROR: Could not parse id");
+
+                storage
+                    .insert(resource_id, content, format)
+                    .unwrap();
+            }
+
+            FileCommand::Read { storage, id, type_ } => {
+                let (file_path, storage_type) = translate_storage(storage)
+                    .expect("ERROR: Could not find storage folder");
+
+                let storage_type = storage_type.unwrap_or(match type_ {
+                    Some(type_) => match type_.to_lowercase().as_str() {
+                        "file" => StorageType::File,
+                        "folder" => StorageType::Folder,
+                        _ => panic!("unknown storage type"),
+                    },
+                    None => StorageType::File,
+                });
+
+                let mut storage = Storage::new(file_path, storage_type)
+                    .expect("ERROR: Could not create storage");
+
+                let resource_id = ResourceId::from_str(id)
+                    .expect("ERROR: Could not parse id");
+
+                let output = storage.read(resource_id);
+
+                match output {
+                    Ok(output) => println!("{}", output),
                     Err(e) => println!("ERROR: {}", e),
                 }
             }
 
-            FileCommand::Read { storage, key } => {
-                let file_path = translate_storage(storage)
+            FileCommand::List {
+                storage,
+                type_,
+                versions,
+            } => {
+                let (file_path, storage_type) = translate_storage(storage)
                     .expect("ERROR: Could not find storage folder");
 
-                let atomic_file = AtomicFile::new(&file_path)
-                    .expect("ERROR: Could not create atomic file");
+                let storage_type = storage_type.unwrap_or(match type_ {
+                    Some(type_) => match type_.to_lowercase().as_str() {
+                        "file" => StorageType::File,
+                        "folder" => StorageType::Folder,
+                        _ => panic!("unknown storage type"),
+                    },
+                    None => StorageType::File,
+                });
 
-                match commands::file::file_read(&atomic_file, key) {
-                    Ok(output) => {
-                        println!("{}", output);
-                    }
-                    Err(e) => println!("ERROR: {}", e),
-                }
-            }
+                let mut storage = Storage::new(file_path, storage_type)
+                    .expect("ERROR: Could not create storage");
 
-            FileCommand::List { storage, versions } => {
-                let file_path = translate_storage(storage)
-                    .expect("ERROR: Could not find storage folder");
+                storage
+                    .load()
+                    .expect("ERROR: Could not load storage");
 
-                match commands::file::file_list(file_path, versions) {
-                    Ok(output) => {
-                        println!("{}", output);
-                    }
-                    Err(e) => println!("ERROR: {}", e),
-                }
+                let output = storage
+                    .list(*versions)
+                    .expect("ERROR: Could not list storage content");
+
+                println!("{}", output);
             }
         },
     }
 }
 
-fn translate_storage(storage: &String) -> Option<PathBuf> {
-    if let Ok(path) = PathBuf::from_str(&storage) {
+fn translate_storage(storage: &str) -> Option<(PathBuf, Option<StorageType>)> {
+    if let Ok(path) = PathBuf::from_str(storage) {
         if path.exists() && path.is_dir() {
-            return Some(path);
+            return Some((path, None));
         }
     }
 
-    let root = provide_root(&None);
-    if let Some(file) = WalkDir::new(root)
-        .into_iter()
-        .filter_entry(|e| e.file_type().is_dir())
-        .filter_map(|v| v.ok())
-        .find(|f| {
-            f.file_name().to_str().unwrap().to_lowercase() == storage.as_str()
-        })
-    {
-        return Some(file.path().to_path_buf());
-    }
-
     match storage.to_lowercase().as_str() {
-        "tags" => Some(
+        "tags" => Some((
             provide_root(&None)
                 .join(ARK_FOLDER)
                 .join(TAG_STORAGE_FILE),
-        ),
-        "scores" => Some(
+            Some(StorageType::File),
+        )),
+        "scores" => Some((
             provide_root(&None)
                 .join(ARK_FOLDER)
                 .join(SCORE_STORAGE_FILE),
-        ),
-        "stats" => Some(
+            Some(StorageType::File),
+        )),
+        "stats" => Some((
             provide_root(&None)
                 .join(ARK_FOLDER)
                 .join(STATS_FOLDER),
-        ),
-        "properties" => Some(
+            Some(StorageType::Folder),
+        )),
+        "properties" => Some((
             provide_root(&None)
                 .join(ARK_FOLDER)
                 .join(PROPERTIES_STORAGE_FOLDER),
-        ),
-        "metadata" => Some(
+            Some(StorageType::Folder),
+        )),
+        "metadata" => Some((
             provide_root(&None)
                 .join(ARK_FOLDER)
                 .join(METADATA_STORAGE_FOLDER),
-        ),
-        "previews" => Some(
+            Some(StorageType::Folder),
+        )),
+        "previews" => Some((
             provide_root(&None)
                 .join(ARK_FOLDER)
                 .join(PREVIEWS_STORAGE_FOLDER),
-        ),
-        "thumbnails" => Some(
+            Some(StorageType::Folder),
+        )),
+        "thumbnails" => Some((
             provide_root(&None)
                 .join(ARK_FOLDER)
                 .join(THUMBNAILS_STORAGE_FOLDER),
-        ),
+            Some(StorageType::Folder),
+        )),
         _ => None,
     }
-    .filter(|path| path.exists() && path.is_dir())
 }
 
 fn discover_roots(roots_cfg: &Option<PathBuf>) -> Vec<PathBuf> {
@@ -576,41 +626,4 @@ fn timestamp() -> Duration {
     return start
         .duration_since(UNIX_EPOCH)
         .expect("Time went backwards!");
-}
-
-// createa test for the transalte_storage function
-// Define the test module
-#[cfg(test)]
-mod tests {
-    // Import necessary items for testing
-    use super::*;
-
-    // Define a test function
-    #[test]
-    fn test_translate_storage() {
-        let test_dir =
-            provide_root(&None).join(PathBuf::from_str("./test_dir").unwrap());
-        let ark_dir = test_dir.join(ARK_FOLDER);
-
-        // Creating a test atomic file
-        let hello_dir = ark_dir.join("hello");
-        create_dir_all(&hello_dir).unwrap();
-
-        assert_eq!(
-            translate_storage(&"hello".to_string())
-                .unwrap_or(PathBuf::from_str(".").unwrap()),
-            hello_dir
-        );
-
-        assert!(
-            translate_storage(&"./test_dir/.ark/hello".to_string()).is_some()
-        );
-
-        assert!(translate_storage(&"./test_dir/.ark/nonexist".to_string())
-            .is_none());
-
-        assert!(translate_storage(&"metadata".to_string()).is_some());
-
-        assert!(translate_storage(&"properties".to_string()).is_some());
-    }
 }

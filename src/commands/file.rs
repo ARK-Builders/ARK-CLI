@@ -1,6 +1,6 @@
 use crate::parsers::{self, Format};
 use arklib::{modify, modify_json, AtomicFile};
-use std::{fmt::Write, path::PathBuf, process::Output};
+use std::{fmt::Write, path::PathBuf};
 use walkdir::WalkDir;
 
 pub fn file_append(
@@ -15,7 +15,7 @@ pub fn file_append(
             combined_vec
         })
         .map_err(|_| "ERROR: Could not append string".to_string()),
-        parsers::Format::Json => {
+        parsers::Format::KeyValue => {
             let values = parsers::key_value_to_str(&content)
                 .map_err(|_| "ERROR: Could not parse json".to_string())?;
 
@@ -35,7 +35,7 @@ pub fn file_insert(
             modify(&atomic_file, |_| content.as_bytes().to_vec())
                 .map_err(|_| "ERROR: Could not insert string".to_string())
         }
-        parsers::Format::Json => {
+        parsers::Format::KeyValue => {
             let values = parsers::key_value_to_str(&content)
                 .map_err(|_| "ERROR: Could not parse json".to_string())?;
 
@@ -57,6 +57,7 @@ pub fn file_insert(
     }
 }
 
+#[allow(dead_code)]
 pub fn file_read(
     atomic_file: &AtomicFile,
     key: &Option<String>,
@@ -107,6 +108,7 @@ pub fn file_read(
     }
 }
 
+#[allow(dead_code)]
 pub fn file_list(path: PathBuf, versions: &bool) -> Result<String, String> {
     let mut output = String::new();
 
@@ -127,11 +129,13 @@ pub fn file_list(path: PathBuf, versions: &bool) -> Result<String, String> {
             output,
             "{}",
             format_line("version", "name", "machine", "path"),
-        );
+        )
+        .map_err(|_| "Could not write to output".to_string())?;
 
         for file in files {
             if let Some(file) = format_file(&file) {
-                writeln!(output, "{}", file);
+                writeln!(output, "{}", file)
+                    .map_err(|_| "Could not write to output".to_string())?;
             }
         }
     } else {
@@ -144,7 +148,8 @@ pub fn file_list(path: PathBuf, versions: &bool) -> Result<String, String> {
                     .unwrap()
                     .to_str()
                     .unwrap()
-            );
+            )
+            .map_err(|_| "Could not write to output".to_string())?;
         }
     }
 
@@ -198,7 +203,12 @@ fn append_json(
     Ok(())
 }
 
-fn format_line<A, B, C, D>(version: A, name: B, machine: C, path: D) -> String
+pub fn format_line<A, B, C, D>(
+    version: A,
+    name: B,
+    machine: C,
+    path: D,
+) -> String
 where
     A: std::fmt::Display,
     B: std::fmt::Display,
@@ -208,7 +218,7 @@ where
     format!("{: <8} {: <14} {: <36} {}", version, name, machine, path)
 }
 
-fn format_file(file: &AtomicFile) -> Option<String> {
+pub fn format_file(file: &AtomicFile) -> Option<String> {
     let current = file.load().ok()?;
 
     if current.version == 0 {
