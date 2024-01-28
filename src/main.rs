@@ -138,7 +138,7 @@ fn main() {
                     options.copy_inside = true;
 
                     let result = dir::copy(
-                        root.join(&arklib::STORAGES_FOLDER),
+                        root.join(&arklib::ARK_FOLDER),
                         storage_backup,
                         &options,
                     );
@@ -328,7 +328,7 @@ fn monitor_index(root_dir: &Option<PathBuf>, interval: Option<u64>) {
                     thread::sleep(pause);
 
                     let start = Instant::now();
-                    match index.update() {
+                    match index.update_all() {
                         Err(msg) => println!("Oops! {}", msg),
                         Ok(diff) => {
                             let duration = start.elapsed();
@@ -347,10 +347,6 @@ fn monitor_index(root_dir: &Option<PathBuf>, interval: Option<u64>) {
                 let index = rwlock.read().unwrap();
 
                 println!("Here are {} entries in the index", index.size());
-
-                for (key, count) in index.collisions.iter() {
-                    println!("Id {:?} calculated {} times", key, count);
-                }
             }
         }
         Err(err) => println!("Failure: {:?}", err),
@@ -358,7 +354,7 @@ fn monitor_index(root_dir: &Option<PathBuf>, interval: Option<u64>) {
 }
 
 fn storages_exists(path: &Path) -> bool {
-    let meta = metadata(path.join(&arklib::STORAGES_FOLDER));
+    let meta = metadata(path.join(&arklib::ARK_FOLDER));
     if let Ok(meta) = meta {
         return meta.is_dir();
     }
