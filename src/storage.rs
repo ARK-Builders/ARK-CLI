@@ -154,7 +154,6 @@ impl Storage {
                 }
 
                 let atomic_file = AtomicFile::new(&folder_path)
-                    // .expect("ERROR: Could not create atomic file");
                     .map_err(|e| {
                         format!(
                             "Failed to create atomic file at {} with error: {:?}",
@@ -182,7 +181,6 @@ impl Storage {
         match self.storage_type {
             StorageType::File => {
                 let atomic_file = AtomicFile::new(&self.path)
-                    // .expect("ERROR: Could not create atomic file");
                     .map_err(|e| {
                         format!(
                             "Failed to create atomic file at {} with error: {:?}",
@@ -223,7 +221,6 @@ impl Storage {
                 }
 
                 let atomic_file = AtomicFile::new(&folder_path)
-                    // .expect("ERROR: Could not create atomic file");
                     .map_err(|e| {
                         format!(
                             "Failed to create atomic file at {} with error: {:?}",
@@ -256,7 +253,6 @@ impl Storage {
         match self.storage_type {
             StorageType::File => {
                 let atomic_file = AtomicFile::new(&self.path)
-                    // .expect("ERROR: Could not create atomic file");
                     .map_err(|e| {
                         format!(
                             "Failed to create atomic file at {} with error: {:?}",
@@ -297,7 +293,6 @@ impl Storage {
                 }
 
                 let atomic_file = AtomicFile::new(&folder_path)
-                    // .expect("ERROR: Could not create atomic file");
                     .map_err(|e| {
                         format!(
                             "Failed to create atomic file at {} with error: {:?}",
@@ -333,7 +328,6 @@ impl Storage {
             match self.storage_type {
                 StorageType::File => {
                     let atomic_file = AtomicFile::new(&self.path)
-                    // .expect("ERROR: Could not create atomic file");
                     .map_err(|e| {
                         format!(
                             "Failed to create atomic file at {} with error: {:?}",
