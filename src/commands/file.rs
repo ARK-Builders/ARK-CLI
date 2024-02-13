@@ -1,7 +1,6 @@
 use crate::parsers::{self, Format};
 use arklib::{modify, modify_json, AtomicFile};
-use std::{fmt::Write, path::PathBuf};
-use walkdir::WalkDir;
+
 
 pub fn file_append(
     atomic_file: &AtomicFile,

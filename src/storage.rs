@@ -180,13 +180,13 @@ impl Storage {
     pub fn read(&mut self, id: ResourceId) -> Result<String, String> {
         match self.storage_type {
             StorageType::File => {
-                let atomic_file = AtomicFile::new(&self.path)
-                    .map_err(|e| {
-                        format!(
-                            "Failed to create atomic file at {} with error: {:?}",
-                            self.path.display(), e
-                        )
-                    })?;
+                let atomic_file = AtomicFile::new(&self.path).map_err(|e| {
+                    format!(
+                        "Failed to create atomic file at {} with error: {:?}",
+                        self.path.display(),
+                        e
+                    )
+                })?;
 
                 let atomic_file_data = atomic_file.load().map_err(|e| {
                     format!(
@@ -252,13 +252,13 @@ impl Storage {
     ) -> Result<(), String> {
         match self.storage_type {
             StorageType::File => {
-                let atomic_file = AtomicFile::new(&self.path)
-                    .map_err(|e| {
-                        format!(
-                            "Failed to create atomic file at {} with error: {:?}",
-                            self.path.display(), e
-                        )
-                    })?;
+                let atomic_file = AtomicFile::new(&self.path).map_err(|e| {
+                    format!(
+                        "Failed to create atomic file at {} with error: {:?}",
+                        self.path.display(),
+                        e
+                    )
+                })?;
 
                 let content = match format {
                     Format::KeyValue => return Err(
