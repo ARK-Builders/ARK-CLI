@@ -1,22 +1,30 @@
-use arklib::app_id;
+use std::fs::{create_dir_all, File};
+use std::io::Write;
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 use arklib::id::ResourceId;
 use arklib::pdf::PDFQuality;
+use arklib::{app_id, provide_index, INDEX_PATH};
 use arklib::{
     ARK_FOLDER, METADATA_STORAGE_FOLDER, PREVIEWS_STORAGE_FOLDER,
     PROPERTIES_STORAGE_FOLDER, SCORE_STORAGE_FILE, STATS_FOLDER,
     TAG_STORAGE_FILE, THUMBNAILS_STORAGE_FOLDER,
 };
+
+use chrono::prelude::DateTime;
+use chrono::Utc;
+
 use clap::{Parser, Subcommand};
+
 use fs_extra::dir::{self, CopyOptions};
+
 use home::home_dir;
-use std::fs::{create_dir_all, File};
-use std::io::Write;
-use std::path::PathBuf;
-use std::str::FromStr;
-use storage::StorageType;
 
 use crate::parsers::Format;
 use crate::storage::Storage;
+use storage::StorageType;
 use util::{
     discover_roots, monitor_index, provide_root, storages_exists, timestamp,
 };
@@ -56,6 +64,17 @@ enum Command {
         #[clap(parse(from_os_str))]
         path: Option<PathBuf>,
         quality: Option<String>,
+    },
+
+    List {
+        #[clap(parse(from_os_str))]
+        root_dir: Option<PathBuf>,
+
+        #[clap(long, short)]
+        entry: Option<String>,
+
+        #[clap(long, short)]
+        timestamp: Option<bool>,
     },
 
     #[clap(subcommand)]
@@ -143,6 +162,12 @@ enum Link {
     },
 }
 
+enum EntryOutput {
+    ID,
+    Path,
+    Both,
+}
+
 const ARK_CONFIG: &str = ".config/ark";
 const ARK_BACKUPS_PATH: &str = ".ark-backups";
 const ROOTS_CFG_FILENAME: &str = "roots";
@@ -165,6 +190,50 @@ async fn main() {
     });
 
     match &args.command {
+        Command::List {
+            entry,
+            root_dir,
+            timestamp,
+        } => {
+            let root = provide_root(root_dir);
+
+            let entry_output: EntryOutput = match entry {
+                Some(entry) => match entry.to_lowercase().as_str() {
+                    "id" => EntryOutput::ID,
+                    "path" => EntryOutput::Path,
+                    "both" => EntryOutput::Both,
+                    _ => panic!("unknown entry option"),
+                },
+                None => EntryOutput::ID,
+            };
+
+            let index = provide_index(&root).expect("could not provide index");
+
+            let resource_index = index.read().unwrap();
+
+            for (path, resource) in resource_index.path2id.iter() {
+                let output: String = match entry_output {
+                    EntryOutput::ID => resource.id.to_string(),
+                    EntryOutput::Path => path.display().to_string(),
+                    EntryOutput::Both => {
+                        format!("{}@{}", resource.id, path.display())
+                    }
+                };
+
+                let datetime = DateTime::<Utc>::from(resource.modified);
+
+                if let Some(timestamp) = timestamp {
+                    let timestamp_str = datetime
+                        .format("%Y-%m-%d %H:%M:%S.%f")
+                        .to_string();
+
+                    println!("{} last modified on {}", output, timestamp_str);
+                } else {
+                    println!("{}", output);
+                }
+            }
+        }
+
         Command::Backup { roots_cfg } => {
             let timestamp = timestamp().as_secs();
             let backup_dir = home_dir()
