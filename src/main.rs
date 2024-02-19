@@ -55,8 +55,12 @@ async fn main() {
     match &args.command {
         Command::List {
             entry,
+            entry_both,
+            entry_id,
+            entry_path,
+
             root_dir,
-            timestamp,
+            modified,
             tags,
             scores,
             sort,
@@ -64,9 +68,15 @@ async fn main() {
         } => {
             let root = provide_root(root_dir);
 
-            let entry_output = match entry {
-                Some(entry) => entry,
-                None => &EntryOutput::Id,
+            let entry_output = match (entry, entry_id, entry_path, entry_both) {
+                (Some(e), false, false, false) => e,
+                (None, true, false, false) => &EntryOutput::Id,
+                (None, false, true, false) => &EntryOutput::Path,
+                (None, false, false, true) => &EntryOutput::Both,
+                (None, true, true, false) => &EntryOutput::Both,
+                _ => panic!(
+                    "incompatible entry output options, please choose only one"
+                ),
             };
 
             let index = provide_index(&root).expect("could not provide index");
@@ -133,7 +143,7 @@ async fn main() {
 
                 output.push_str(&entry_str);
 
-                if timestamp.unwrap_or(false) {
+                if *modified {
                     let timestamp_str = datetime
                         .format("%Y-%m-%d %H:%M:%S.%f")
                         .to_string();
@@ -143,11 +153,11 @@ async fn main() {
                     ));
                 }
 
-                if tags.unwrap_or(false) {
+                if *tags {
                     output.push_str(&format!(" with tags {}", tags_list));
                 }
 
-                if scores.unwrap_or(false) {
+                if *scores {
                     output.push_str(&format!(" with score {}", scores_list));
                 }
 

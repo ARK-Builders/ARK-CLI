@@ -46,14 +46,23 @@ pub enum Command {
         #[clap(long)]
         entry: Option<EntryOutput>,
 
-        #[clap(long)]
-        timestamp: Option<bool>,
+        #[clap(long, short = 'i', action)]
+        entry_id: bool,
 
-        #[clap(long)]
-        tags: Option<bool>,
+        #[clap(long, short = 'p', action)]
+        entry_path: bool,
 
-        #[clap(long)]
-        scores: Option<bool>,
+        #[clap(long, short = 'b', action)]
+        entry_both: bool,
+
+        #[clap(long, short, action)]
+        modified: bool,
+
+        #[clap(long, short, action)]
+        tags: bool,
+
+        #[clap(long, short, action)]
+        scores: bool,
 
         #[clap(long)]
         sort: Option<Sort>,
