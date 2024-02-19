@@ -121,13 +121,17 @@ async fn main() {
 
             for (path, resource, tags_list, scores_list, datetime) in resources
             {
-                let mut output: String = match entry_output {
+                let mut output = String::new();
+
+                let entry_str = match entry_output {
                     EntryOutput::Id => resource.id.to_string(),
                     EntryOutput::Path => path.display().to_string(),
                     EntryOutput::Both => {
                         format!("{}@{}", resource.id, path.display())
                     }
                 };
+
+                output.push_str(&entry_str);
 
                 if timestamp.unwrap_or(false) {
                     let timestamp_str = datetime
