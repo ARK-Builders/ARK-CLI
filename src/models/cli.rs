@@ -52,9 +52,6 @@ pub enum Command {
         #[clap(long, short = 'p', action)]
         entry_path: bool,
 
-        #[clap(long, short = 'b', action)]
-        entry_both: bool,
-
         #[clap(long, short, action)]
         modified: bool,
 

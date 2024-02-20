@@ -55,7 +55,6 @@ async fn main() {
     match &args.command {
         Command::List {
             entry,
-            entry_both,
             entry_id,
             entry_path,
 
@@ -68,12 +67,12 @@ async fn main() {
         } => {
             let root = provide_root(root_dir);
 
-            let entry_output = match (entry, entry_id, entry_path, entry_both) {
-                (Some(e), false, false, false) => e,
-                (None, true, false, false) => &EntryOutput::Id,
-                (None, false, true, false) => &EntryOutput::Path,
-                (None, false, false, true) => &EntryOutput::Both,
-                (None, true, true, false) => &EntryOutput::Both,
+            let entry_output = match (entry, entry_id, entry_path) {
+                (Some(e), false, false) => e,
+                (None, true, false) => &EntryOutput::Id,
+                (None, false, true) => &EntryOutput::Path,
+                (None, true, true) => &EntryOutput::Both,
+                (None, false, false) => &EntryOutput::Id, // default value
                 _ => panic!(
                     "incompatible entry output options, please choose only one"
                 ),
@@ -93,7 +92,7 @@ async fn main() {
                         &resource.id.to_string(),
                         &None,
                     )
-                    .unwrap_or("".to_string());
+                    .unwrap_or("NO_TAGS".to_string());
 
                     let scores_list = read_storage_value(
                         &root,
@@ -101,7 +100,7 @@ async fn main() {
                         &resource.id.to_string(),
                         &None,
                     )
-                    .unwrap_or("0".to_string());
+                    .unwrap_or("NO_SCORE".to_string());
 
                     let datetime = DateTime::<Utc>::from(resource.modified);
 
