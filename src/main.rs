@@ -1,5 +1,5 @@
 use std::fs::{create_dir_all, File};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -35,6 +35,15 @@ const ARK_CONFIG: &str = ".config/ark";
 const ARK_BACKUPS_PATH: &str = ".ark-backups";
 const ROOTS_CFG_FILENAME: &str = "roots";
 
+struct StorageEntry {
+    path: Option<PathBuf>,
+    resource: Option<ResourceId>,
+    content: Option<String>,
+    tags: Option<Vec<String>>,
+    scores: Option<u32>,
+    datetime: Option<String>,
+}
+
 #[tokio::main]
 async fn main() {
     env_logger::init();
@@ -46,9 +55,11 @@ async fn main() {
     if !ark_dir.exists() {
         std::fs::create_dir(&ark_dir).unwrap();
     }
+
     println!("Loading app id at {}...", ark_dir.display());
+
     let _ = app_id::load(ark_dir).map_err(|e| {
-        println!("Couldn't load app id: {}", e);
+        eprintln!("Couldn't load app id: {}", e);
         std::process::exit(1);
     });
 
@@ -68,96 +79,271 @@ async fn main() {
             let root = provide_root(root_dir);
 
             let entry_output = match (entry, entry_id, entry_path) {
-                (Some(e), false, false) => e,
-                (None, true, false) => &EntryOutput::Id,
-                (None, false, true) => &EntryOutput::Path,
-                (None, true, true) => &EntryOutput::Both,
-                (None, false, false) => &EntryOutput::Id, // default value
+                (Some(e), false, false) => *e,
+                (None, true, false) => EntryOutput::Id,
+                (None, false, true) => EntryOutput::Path,
+                (None, true, true) => EntryOutput::Both,
+                (None, false, false) => EntryOutput::Link, // default value
                 _ => panic!(
                     "incompatible entry output options, please choose only one"
                 ),
             };
 
-            let index = provide_index(&root).expect("could not provide index");
-
-            let resource_index = index.read().expect("could not read index");
-
-            let mut resources = resource_index
+            let mut storage_entries: Vec<StorageEntry> = provide_index(&root)
+                .expect("could not provide index")
+                .read()
+                .expect(
+                    "
+            could not read index",
+                )
                 .path2id
                 .iter()
                 .map(|(path, resource)| {
-                    let tags_list = read_storage_value(
-                        &root,
-                        "tags",
-                        &resource.id.to_string(),
-                        &None,
-                    )
-                    .unwrap_or("NO_TAGS".to_string());
+                    let tags = if *tags {
+                        Some(
+                            read_storage_value(
+                                &root,
+                                "tags",
+                                &resource.id.to_string(),
+                                &None,
+                            )
+                            .map_or(vec![], |s| {
+                                s.split(',')
+                                    .map(|s| s.trim().to_string())
+                                    .collect::<Vec<_>>()
+                            }),
+                        )
+                    } else {
+                        None
+                    };
 
-                    let scores_list = read_storage_value(
-                        &root,
-                        "scores",
-                        &resource.id.to_string(),
-                        &None,
-                    )
-                    .unwrap_or("NO_SCORE".to_string());
+                    let scores = if *scores {
+                        Some(
+                            read_storage_value(
+                                &root,
+                                "scores",
+                                &resource.id.to_string(),
+                                &None,
+                            )
+                            .map_or(0, |s| s.parse::<u32>().unwrap_or(0)),
+                        )
+                    } else {
+                        None
+                    };
 
-                    let datetime = DateTime::<Utc>::from(resource.modified);
+                    let datetime = if *modified {
+                        let format = "%b %e %H:%M %Y";
+                        Some(
+                            DateTime::<Utc>::from(resource.modified)
+                                .format(format)
+                                .to_string(),
+                        )
+                    } else {
+                        None
+                    };
 
-                    (path, resource, tags_list, scores_list, datetime)
+                    let (path, resource, content) = match entry_output {
+                        EntryOutput::Both => (
+                            Some(path.to_owned().into_path_buf()),
+                            Some(resource.id),
+                            None,
+                        ),
+                        EntryOutput::Path => {
+                            (Some(path.to_owned().into_path_buf()), None, None)
+                        }
+                        EntryOutput::Id => (None, Some(resource.id), None),
+                        EntryOutput::Link => {
+                            let mut file = File::open(path).unwrap();
+                            let mut contents = String::new();
+                            file.read_to_string(&mut contents).unwrap();
+                            (None, None, Some(contents))
+                        }
+                    };
+
+                    StorageEntry {
+                        path,
+                        resource,
+                        content,
+                        tags,
+                        scores,
+                        datetime,
+                    }
                 })
                 .collect::<Vec<_>>();
 
             match sort {
-                Some(Sort::Asc) => resources
-                    .sort_by(|(_, _, _, _, a), (_, _, _, _, b)| a.cmp(b)),
+                Some(Sort::Asc) => {
+                    storage_entries.sort_by(|a, b| a.datetime.cmp(&b.datetime))
+                }
 
-                Some(Sort::Desc) => resources
-                    .sort_by(|(_, _, _, _, a), (_, _, _, _, b)| b.cmp(a)),
+                Some(Sort::Desc) => {
+                    storage_entries.sort_by(|a, b| b.datetime.cmp(&a.datetime))
+                }
                 None => (),
             };
 
             if let Some(filter) = filter {
-                resources = resources
-                    .into_iter()
-                    .filter(|(_, _, tags_list, _, _)| {
-                        tags_list
-                            .split(',')
-                            .any(|tag| tag.trim() == filter)
-                    })
-                    .collect();
+                storage_entries.retain(|entry| {
+                    entry
+                        .tags
+                        .as_ref()
+                        .map(|tags| tags.contains(&filter))
+                        .unwrap_or(false)
+                });
             }
 
-            for (path, resource, tags_list, scores_list, datetime) in resources
-            {
+            let no_tags = "NO_TAGS";
+            let no_scores = "NO_SCORE";
+
+            let longest_path = storage_entries
+                .iter()
+                .map(|entry| {
+                    if let Some(path) = entry.path.as_ref() {
+                        path.display().to_string().len()
+                    } else {
+                        0
+                    }
+                })
+                .max_by(|a, b| a.cmp(&b))
+                .unwrap_or(0);
+
+            let longest_id = storage_entries.iter().fold(0, |acc, entry| {
+                if let Some(resource) = &entry.resource {
+                    let id_len = resource.to_string().len();
+                    if id_len > acc {
+                        id_len
+                    } else {
+                        acc
+                    }
+                } else {
+                    acc
+                }
+            });
+
+            let longest_tags = storage_entries.iter().fold(0, |acc, entry| {
+                let tags_len = entry
+                    .tags
+                    .as_ref()
+                    .map(|tags| {
+                        if tags.len() == 0 {
+                            no_tags.len()
+                        } else {
+                            tags.join(", ").len()
+                        }
+                    })
+                    .unwrap_or(0);
+                if tags_len > acc {
+                    tags_len
+                } else {
+                    acc
+                }
+            });
+
+            let longest_scores =
+                storage_entries.iter().fold(0, |acc, entry| {
+                    let scores_len = entry
+                        .scores
+                        .as_ref()
+                        .map(|score| {
+                            if *score == 0 {
+                                no_scores.len()
+                            } else {
+                                score.to_string().len()
+                            }
+                        })
+                        .unwrap_or(0);
+                    if scores_len > acc {
+                        scores_len
+                    } else {
+                        acc
+                    }
+                });
+
+            let longest_datetime =
+                storage_entries.iter().fold(0, |acc, entry| {
+                    let datetime_len = entry
+                        .datetime
+                        .as_ref()
+                        .map(|datetime| datetime.len())
+                        .unwrap_or(0);
+                    if datetime_len > acc {
+                        datetime_len
+                    } else {
+                        acc
+                    }
+                });
+
+            let longest_content =
+                storage_entries.iter().fold(0, |acc, entry| {
+                    let content_len = entry
+                        .content
+                        .as_ref()
+                        .map(|content| content.len())
+                        .unwrap_or(0);
+                    if content_len > acc {
+                        content_len
+                    } else {
+                        acc
+                    }
+                });
+
+            for entry in &storage_entries {
                 let mut output = String::new();
 
-                let entry_str = match entry_output {
-                    EntryOutput::Id => resource.id.to_string(),
-                    EntryOutput::Path => path.display().to_string(),
-                    EntryOutput::Both => {
-                        format!("{}@{}", resource.id, path.display())
-                    }
-                };
+                if let Some(content) = &entry.content {
+                    output.push_str(&format!("{:width$} ", content, width = longest_content));
+                }
 
-                output.push_str(&entry_str);
-
-                if *modified {
-                    let timestamp_str = datetime
-                        .format("%Y-%m-%d %H:%M:%S.%f")
-                        .to_string();
+                if let Some(path) = &entry.path {
                     output.push_str(&format!(
-                        " last modified on {}",
-                        timestamp_str
+                        "{:width$} ",
+                        path.display(),
+                        width = longest_path
                     ));
                 }
 
-                if *tags {
-                    output.push_str(&format!(" with tags {}", tags_list));
+                if let Some(resource) = &entry.resource {
+                    output.push_str(&format!(
+                        "{:width$} ",
+                        resource.to_string(),
+                        width = longest_id
+                    ));
                 }
 
-                if *scores {
-                    output.push_str(&format!(" with score {}", scores_list));
+                if let Some(tags) = &entry.tags {
+                    let tags_out = if tags.len() == 0 {
+                        no_tags.to_owned()
+                    } else {
+                        tags.join(", ")
+                    };
+
+                    output.push_str(&format!(
+                        "{:width$} ",
+                        tags_out,
+                        width = longest_tags
+                    ));
+                }
+
+                if let Some(scores) = &entry.scores {
+                    let scores_out = if *scores == 0 {
+                        no_scores.to_owned()
+                    } else {
+                        scores.to_string()
+                    };
+
+                    output.push_str(&format!(
+                        "{:width$} ",
+                        scores_out,
+                        width = longest_scores
+                    ));
+                }
+
+                if let Some(datetime) = &entry.datetime {
+                    output.push_str(&format!(
+                        "{:width$} ",
+                        datetime,
+                        width = longest_datetime
+                    ));
                 }
 
                 println!("{}", output);
