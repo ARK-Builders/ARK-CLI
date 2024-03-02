@@ -24,38 +24,35 @@ pub fn discover_roots(roots_cfg: &Option<PathBuf>) -> Vec<PathBuf> {
             "\tRoots config provided explicitly:\n\t\t{}",
             path.display()
         );
-        let config = File::open(&path).expect("File doesn't exist!");
+        let config = File::open(path).expect("File doesn't exist!");
+
+        parse_roots(config)
+    } else if let Ok(config) = File::open(ARK_CONFIG) {
+        println!(
+            "\tRoots config was found automatically:\n\t\t{}",
+            &ARK_CONFIG
+        );
 
         parse_roots(config)
     } else {
-        if let Ok(config) = File::open(&ARK_CONFIG) {
-            println!(
-                "\tRoots config was found automatically:\n\t\t{}",
-                &ARK_CONFIG
-            );
+        println!("\tRoots config wasn't found.");
 
-            parse_roots(config)
+        println!("Looking for a folder containing tag storage:");
+        let path =
+            canonicalize(current_dir().expect("Can't open current directory!"))
+                .expect("Couldn't canonicalize working directory!");
+
+        let result = path.ancestors().find(|path| {
+            println!("\t{}", path.display());
+            storages_exists(path)
+        });
+
+        if let Some(root) = result {
+            println!("Root folder found:\n\t{}", root.display());
+            vec![root.to_path_buf()]
         } else {
-            println!("\tRoots config wasn't found.");
-
-            println!("Looking for a folder containing tag storage:");
-            let path = canonicalize(
-                current_dir().expect("Can't open current directory!"),
-            )
-            .expect("Couldn't canonicalize working directory!");
-
-            let result = path.ancestors().find(|path| {
-                println!("\t{}", path.display());
-                storages_exists(path)
-            });
-
-            if let Some(root) = result {
-                println!("Root folder found:\n\t{}", root.display());
-                vec![root.to_path_buf()]
-            } else {
-                println!("Root folder wasn't found.");
-                vec![]
-            }
+            println!("Root folder wasn't found.");
+            vec![]
         }
     }
 }
@@ -129,7 +126,7 @@ pub fn monitor_index(root_dir: &Option<PathBuf>, interval: Option<u64>) {
 }
 
 pub fn storages_exists(path: &Path) -> bool {
-    let meta = metadata(path.join(&arklib::ARK_FOLDER));
+    let meta = metadata(path.join(arklib::ARK_FOLDER));
     if let Ok(meta) = meta {
         return meta.is_dir();
     }
@@ -138,7 +135,7 @@ pub fn storages_exists(path: &Path) -> bool {
 }
 
 pub fn parse_roots(config: File) -> Vec<PathBuf> {
-    return BufReader::new(config)
+    BufReader::new(config)
         .lines()
         .filter_map(|line| match line {
             Ok(path) => Some(PathBuf::from(path)),
@@ -147,14 +144,14 @@ pub fn parse_roots(config: File) -> Vec<PathBuf> {
                 None
             }
         })
-        .collect();
+        .collect()
 }
 
 pub fn timestamp() -> Duration {
     let start = SystemTime::now();
-    return start
+    start
         .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards!");
+        .expect("Time went backwards!")
 }
 
 pub fn translate_storage(

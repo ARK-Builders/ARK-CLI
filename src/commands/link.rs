@@ -24,7 +24,7 @@ pub fn load_link(
     id: &Option<ResourceId>,
 ) -> Result<Link, String> {
     let path_from_index = id.map(|id| {
-        let index = provide_index(&root);
+        let index = provide_index(root);
         index.id2path[&id].as_path().to_path_buf()
     });
     let path_from_user = file_path;

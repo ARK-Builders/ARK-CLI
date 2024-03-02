@@ -51,7 +51,7 @@ impl Storage {
         }
 
         Ok(Self {
-            path: path.into(),
+            path,
             storage_type,
             files: Vec::new(),
         })
@@ -149,12 +149,8 @@ impl Storage {
                     &content,
                     Format::Raw,
                 ) {
-                    Ok(_) => {
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        return Err(e);
-                    }
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(e),
                 }
             }
             StorageType::Folder => {
@@ -176,20 +172,13 @@ impl Storage {
                         )
                     })?;
 
-                match commands::file::file_append(
-                    &atomic_file,
-                    &content,
-                    format,
-                ) {
-                    Ok(_) => {
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        return Err(e);
-                    }
+                match commands::file::file_append(&atomic_file, content, format)
+                {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(e),
                 }
             }
-        };
+        }
     }
 
     pub fn read(&mut self, id: ResourceId) -> Result<String, String> {
@@ -223,7 +212,7 @@ impl Storage {
                         Ok(line_id) => {
                             if id == line_id {
                                 let data = line.next().unwrap();
-                                return Ok(format!("{}", data));
+                                return Ok(data.to_string());
                             }
                         }
                         Err(e) => {
@@ -293,12 +282,8 @@ impl Storage {
                     &content,
                     Format::Raw,
                 ) {
-                    Ok(_) => {
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        return Err(e);
-                    }
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(e),
                 }
             }
             StorageType::Folder => {
@@ -320,20 +305,13 @@ impl Storage {
                         )
                     })?;
 
-                match commands::file::file_insert(
-                    &atomic_file,
-                    &content,
-                    format,
-                ) {
-                    Ok(_) => {
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        return Err(e);
-                    }
+                match commands::file::file_insert(&atomic_file, content, format)
+                {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(e),
                 }
             }
-        };
+        }
     }
 
     pub fn list(&self, versions: bool) -> Result<String, String> {
@@ -362,7 +340,7 @@ impl Storage {
                         )
                     })?;
 
-                    writeln!(output, "{: <16} {}", "id", "value")
+                    writeln!(output, "{: <16} value", "id")
                         .map_err(|_| "Could not write to output".to_string())?;
 
                     let data =
@@ -375,14 +353,10 @@ impl Storage {
                         let id = line.next();
                         let data = line.next();
 
-                        match (id, data) {
-                            (Some(id), Some(data)) => {
-                                writeln!(output, "{: <16} {}", id, data)
-                                    .map_err(|_| {
-                                        "Could not write to output".to_string()
-                                    })?;
-                            }
-                            _ => {}
+                        if let (Some(id), Some(data)) = (id, data) {
+                            writeln!(output, "{: <16} {}", id, data).map_err(
+                                |_| "Could not write to output".to_string(),
+                            )?;
                         }
                     }
                 }

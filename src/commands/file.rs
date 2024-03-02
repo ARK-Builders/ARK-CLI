@@ -7,17 +7,17 @@ pub fn file_append(
     format: Format,
 ) -> Result<(), String> {
     match format {
-        Format::Raw => modify(&atomic_file, |current| {
+        Format::Raw => modify(atomic_file, |current| {
             let mut combined_vec: Vec<u8> = current.to_vec();
             combined_vec.extend_from_slice(content.as_bytes());
             combined_vec
         })
         .map_err(|_| "ERROR: Could not append string".to_string()),
         Format::KeyValue => {
-            let values = format::key_value_to_str(&content)
+            let values = format::key_value_to_str(content)
                 .map_err(|_| "ERROR: Could not parse json".to_string())?;
 
-            append_json(&atomic_file, values.to_vec())
+            append_json(atomic_file, values.to_vec())
                 .map_err(|_| "ERROR: Could not append json".to_string())
         }
     }
@@ -29,14 +29,14 @@ pub fn file_insert(
     format: Format,
 ) -> Result<(), String> {
     match format {
-        Format::Raw => modify(&atomic_file, |_| content.as_bytes().to_vec())
+        Format::Raw => modify(atomic_file, |_| content.as_bytes().to_vec())
             .map_err(|_| "ERROR: Could not insert string".to_string()),
         Format::KeyValue => {
-            let values = format::key_value_to_str(&content)
+            let values = format::key_value_to_str(content)
                 .map_err(|_| "ERROR: Could not parse json".to_string())?;
 
             modify_json(
-                &atomic_file,
+                atomic_file,
                 |current: &mut Option<serde_json::Value>| {
                     let mut new = serde_json::Map::new();
                     for (key, value) in &values {
@@ -57,7 +57,7 @@ fn append_json(
     atomic_file: &AtomicFile,
     data: Vec<(String, String)>,
 ) -> arklib::Result<()> {
-    modify_json(&atomic_file, |current: &mut Option<serde_json::Value>| {
+    modify_json(atomic_file, |current: &mut Option<serde_json::Value>| {
         let current_data = match current {
             Some(current) => {
                 if let Ok(value) = serde_json::to_value(current) {
@@ -74,7 +74,7 @@ fn append_json(
         };
         let mut new = serde_json::Map::new();
 
-        if let None = current_data {
+        if current_data.is_none() {
             for (key, value) in &data {
                 new.insert(
                     key.clone(),
@@ -128,7 +128,7 @@ pub fn format_file(file: &AtomicFile) -> Option<String> {
         .expect("Not a file")
         .to_str()
         .unwrap()
-        .split("_");
+        .split('_');
 
     let name = split.next().unwrap();
 

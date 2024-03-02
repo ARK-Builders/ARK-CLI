@@ -187,7 +187,7 @@ async fn main() {
                     entry
                         .tags
                         .as_ref()
-                        .map(|tags| tags.contains(&filter))
+                        .map(|tags| tags.contains(filter))
                         .unwrap_or(false)
                 });
             }
@@ -204,7 +204,7 @@ async fn main() {
                         0
                     }
                 })
-                .max_by(|a, b| a.cmp(&b))
+                .max_by(|a, b| a.cmp(b))
                 .unwrap_or(0);
 
             let longest_id = storage_entries.iter().fold(0, |acc, entry| {
@@ -225,7 +225,7 @@ async fn main() {
                     .tags
                     .as_ref()
                     .map(|tags| {
-                        if tags.len() == 0 {
+                        if tags.is_empty() {
                             no_tags.len()
                         } else {
                             tags.join(", ").len()
@@ -315,7 +315,7 @@ async fn main() {
                 }
 
                 if let Some(tags) = &entry.tags {
-                    let tags_out = if tags.len() == 0 {
+                    let tags_out = if tags.is_empty() {
                         no_tags.to_owned()
                     } else {
                         tags.join(", ")
@@ -358,8 +358,8 @@ async fn main() {
             let timestamp = timestamp().as_secs();
             let backup_dir = home_dir()
                 .expect("Couldn't retrieve home directory!")
-                .join(&ARK_BACKUPS_PATH)
-                .join(&timestamp.to_string());
+                .join(ARK_BACKUPS_PATH)
+                .join(timestamp.to_string());
 
             if backup_dir.is_dir() {
                 println!("Wait at least 1 second, please!");
@@ -371,7 +371,7 @@ async fn main() {
 
             let (valid, invalid): (Vec<PathBuf>, Vec<PathBuf>) = roots
                 .into_iter()
-                .partition(|root| storages_exists(&root));
+                .partition(|root| storages_exists(root));
 
             if !invalid.is_empty() {
                 println!("These folders don't contain any storages:");
@@ -389,7 +389,7 @@ async fn main() {
                 .expect("Couldn't create backup directory!");
 
             let mut roots_cfg_backup =
-                File::create(&backup_dir.join(&ROOTS_CFG_FILENAME))
+                File::create(backup_dir.join(ROOTS_CFG_FILENAME))
                     .expect("Couldn't backup roots config!");
 
             valid.iter().for_each(|root| {
@@ -403,14 +403,14 @@ async fn main() {
                 .enumerate()
                 .for_each(|(i, root)| {
                     println!("\tRoot {}", root.display());
-                    let storage_backup = backup_dir.join(&i.to_string());
+                    let storage_backup = backup_dir.join(i.to_string());
 
                     let mut options = CopyOptions::new();
                     options.overwrite = true;
                     options.copy_inside = true;
 
                     let result = dir::copy(
-                        root.join(&arklib::ARK_FOLDER),
+                        root.join(arklib::ARK_FOLDER),
                         storage_backup,
                         &options,
                     );
@@ -422,10 +422,10 @@ async fn main() {
 
             println!("Backup created:\n\t{}", backup_dir.display());
         }
-        Command::Collisions { root_dir } => monitor_index(&root_dir, None),
+        Command::Collisions { root_dir } => monitor_index(root_dir, None),
         Command::Monitor { root_dir, interval } => {
             let millis = interval.unwrap_or(1000);
-            monitor_index(&root_dir, Some(millis))
+            monitor_index(root_dir, Some(millis))
         }
         Command::Render { path, quality } => {
             let filepath = path.to_owned().unwrap();
@@ -446,7 +446,7 @@ async fn main() {
                     + ".png",
             );
             let img = arklib::pdf::render_preview_page(buf, quality);
-            img.save(PathBuf::from(dest_path)).unwrap();
+            img.save(dest_path).unwrap();
         }
         Command::Link(link) => match &link {
             Link::Create {
