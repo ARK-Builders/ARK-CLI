@@ -291,7 +291,11 @@ async fn main() {
                 let mut output = String::new();
 
                 if let Some(content) = &entry.content {
-                    output.push_str(&format!("{:width$} ", content, width = longest_content));
+                    output.push_str(&format!(
+                        "{:width$} ",
+                        content,
+                        width = longest_content
+                    ));
                 }
 
                 if let Some(path) = &entry.path {
