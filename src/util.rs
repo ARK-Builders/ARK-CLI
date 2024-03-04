@@ -18,22 +18,25 @@ use std::{fs::File, path::PathBuf};
 use crate::models::storage::{Storage, StorageType};
 use crate::ARK_CONFIG;
 
-pub fn discover_roots(roots_cfg: &Option<PathBuf>) -> Vec<PathBuf> {
+pub fn discover_roots(
+    roots_cfg: &Option<PathBuf>,
+) -> Result<Vec<PathBuf>, String> {
     if let Some(path) = roots_cfg {
         println!(
             "\tRoots config provided explicitly:\n\t\t{}",
             path.display()
         );
-        let config = File::open(path).expect("File doesn't exist!");
+        let config =
+            File::open(path).map_err(|e| "File doesn't exist!".to_owned())?;
 
-        parse_roots(config)
+        Ok(parse_roots(config))
     } else if let Ok(config) = File::open(ARK_CONFIG) {
         println!(
             "\tRoots config was found automatically:\n\t\t{}",
             &ARK_CONFIG
         );
 
-        parse_roots(config)
+        Ok(parse_roots(config))
     } else {
         println!("\tRoots config wasn't found.");
 
@@ -49,20 +52,20 @@ pub fn discover_roots(roots_cfg: &Option<PathBuf>) -> Vec<PathBuf> {
 
         if let Some(root) = result {
             println!("Root folder found:\n\t{}", root.display());
-            vec![root.to_path_buf()]
+            Ok(vec![root.to_path_buf()])
         } else {
             println!("Root folder wasn't found.");
-            vec![]
+            Ok(vec![])
         }
     }
 }
 
-pub fn provide_root(root_dir: &Option<PathBuf>) -> PathBuf {
+pub fn provide_root(root_dir: &Option<PathBuf>) -> Result<PathBuf, String> {
     if let Some(path) = root_dir {
-        path.clone()
+        Ok(path.clone())
     } else {
         current_dir()
-            .expect("Can't open current directory!")
+            .map_err(|e| "Can't open current directory!".to_owned())
             .clone()
     }
 }
@@ -75,12 +78,15 @@ pub fn provide_index(root_dir: &PathBuf) -> ResourceIndex {
     index.clone()
 }
 
-pub fn monitor_index(root_dir: &Option<PathBuf>, interval: Option<u64>) {
-    let dir_path = provide_root(root_dir);
+pub fn monitor_index(
+    root_dir: &Option<PathBuf>,
+    interval: Option<u64>,
+) -> Result<(), String> {
+    let dir_path = provide_root(root_dir)?;
 
     println!("Building index of folder {}", dir_path.display());
     let start = Instant::now();
-    let dir_path = provide_root(root_dir);
+
     let result = arklib::provide_index(dir_path);
     let duration = start.elapsed();
 
@@ -123,6 +129,8 @@ pub fn monitor_index(root_dir: &Option<PathBuf>, interval: Option<u64>) {
         }
         Err(err) => println!("Failure: {:?}", err),
     }
+
+    Ok(())
 }
 
 pub fn storages_exists(path: &Path) -> bool {
@@ -167,42 +175,49 @@ pub fn translate_storage(
     match storage.to_lowercase().as_str() {
         "tags" => Some((
             provide_root(root)
+                .ok()?
                 .join(ARK_FOLDER)
                 .join(TAG_STORAGE_FILE),
             Some(StorageType::File),
         )),
         "scores" => Some((
             provide_root(root)
+                .ok()?
                 .join(ARK_FOLDER)
                 .join(SCORE_STORAGE_FILE),
             Some(StorageType::File),
         )),
         "stats" => Some((
             provide_root(root)
+                .ok()?
                 .join(ARK_FOLDER)
                 .join(STATS_FOLDER),
             Some(StorageType::Folder),
         )),
         "properties" => Some((
             provide_root(root)
+                .ok()?
                 .join(ARK_FOLDER)
                 .join(PROPERTIES_STORAGE_FOLDER),
             Some(StorageType::Folder),
         )),
         "metadata" => Some((
             provide_root(root)
+                .ok()?
                 .join(ARK_FOLDER)
                 .join(METADATA_STORAGE_FOLDER),
             Some(StorageType::Folder),
         )),
         "previews" => Some((
             provide_root(root)
+                .ok()?
                 .join(ARK_FOLDER)
                 .join(PREVIEWS_STORAGE_FOLDER),
             Some(StorageType::Folder),
         )),
         "thumbnails" => Some((
             provide_root(root)
+                .ok()?
                 .join(ARK_FOLDER)
                 .join(THUMBNAILS_STORAGE_FOLDER),
             Some(StorageType::Folder),

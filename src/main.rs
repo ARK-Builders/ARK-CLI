@@ -45,15 +45,17 @@ struct StorageEntry {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), String> {
     env_logger::init();
 
     let args = models::cli::Cli::parse();
 
-    let app_id_dir = home_dir().expect("Couldn't retrieve home directory!");
+    let app_id_dir = home_dir()
+        .ok_or_else(|| "Couldn't retrieve home directory!".to_owned())?;
     let ark_dir = app_id_dir.join(".ark");
     if !ark_dir.exists() {
-        std::fs::create_dir(&ark_dir).unwrap();
+        std::fs::create_dir(&ark_dir)
+            .map_err(|e| format!("Couldn't create .ark directory: {}", e))?;
     }
 
     println!("Loading app id at {}...", ark_dir.display());
@@ -76,29 +78,28 @@ async fn main() {
             sort,
             filter,
         } => {
-            let root = provide_root(root_dir);
+            let root = provide_root(root_dir)?;
 
-            let entry_output = match (entry, entry_id, entry_path) {
-                (Some(e), false, false) => *e,
-                (None, true, false) => EntryOutput::Id,
-                (None, false, true) => EntryOutput::Path,
-                (None, true, true) => EntryOutput::Both,
-                (None, false, false) => EntryOutput::Link, // default value
-                _ => panic!(
-                    "incompatible entry output options, please choose only one"
-                ),
-            };
+            let entry_output =
+                match (entry, entry_id, entry_path) {
+                    (Some(e), false, false) => *e,
+                    (None, true, false) => EntryOutput::Id,
+                    (None, false, true) => EntryOutput::Path,
+                    (None, true, true) => EntryOutput::Both,
+                    (None, false, false) => EntryOutput::Link,
+                    _ => return Err(
+                        "You can't use both entry and entry_id or entry_path"
+                            .to_owned(),
+                    ),
+                };
 
             let mut storage_entries: Vec<StorageEntry> = provide_index(&root)
-                .expect("could not provide index")
+                .map_err(|_| "Could not provide index".to_owned())?
                 .read()
-                .expect(
-                    "
-            could not read index",
-                )
+                .map_err(|_| "Could not read index".to_owned())?
                 .path2id
                 .iter()
-                .map(|(path, resource)| {
+                .filter_map(|(path, resource)| {
                     let tags = if *tags {
                         Some(
                             read_storage_value(
@@ -152,22 +153,26 @@ async fn main() {
                             (Some(path.to_owned().into_path_buf()), None, None)
                         }
                         EntryOutput::Id => (None, Some(resource.id), None),
-                        EntryOutput::Link => {
-                            let mut file = File::open(path).unwrap();
-                            let mut contents = String::new();
-                            file.read_to_string(&mut contents).unwrap();
-                            (None, None, Some(contents))
-                        }
+                        EntryOutput::Link => match File::open(&path) {
+                            Ok(mut file) => {
+                                let mut contents = String::new();
+                                match file.read_to_string(&mut contents) {
+                                    Ok(_) => (None, None, Some(contents)),
+                                    Err(_) => return None,
+                                }
+                            }
+                            Err(_) => return None,
+                        },
                     };
 
-                    StorageEntry {
+                    Some(StorageEntry {
                         path,
                         resource,
                         content,
                         tags,
                         scores,
                         datetime,
-                    }
+                    })
                 })
                 .collect::<Vec<_>>();
 
@@ -353,11 +358,10 @@ async fn main() {
                 println!("{}", output);
             }
         }
-
         Command::Backup { roots_cfg } => {
             let timestamp = timestamp().as_secs();
             let backup_dir = home_dir()
-                .expect("Couldn't retrieve home directory!")
+                .ok_or_else(|| "Couldn't retrieve home directory!".to_owned())?
                 .join(ARK_BACKUPS_PATH)
                 .join(timestamp.to_string());
 
@@ -367,7 +371,7 @@ async fn main() {
             }
 
             println!("Preparing backup:");
-            let roots = discover_roots(roots_cfg);
+            let roots = discover_roots(roots_cfg)?;
 
             let (valid, invalid): (Vec<PathBuf>, Vec<PathBuf>) = roots
                 .into_iter()
@@ -386,15 +390,17 @@ async fn main() {
             }
 
             create_dir_all(&backup_dir)
-                .expect("Couldn't create backup directory!");
+                .map_err(|_| "Couldn't create backup directory!".to_owned())?;
 
             let mut roots_cfg_backup =
                 File::create(backup_dir.join(ROOTS_CFG_FILENAME))
-                    .expect("Couldn't backup roots config!");
+                    .map_err(|_| "Couldn't backup roots config!".to_owned())?;
 
             valid.iter().for_each(|root| {
-                writeln!(roots_cfg_backup, "{}", root.display())
-                    .expect("Couldn't write to roots config backup!")
+                let _ = writeln!(roots_cfg_backup, "{}", root.display())
+                    .map_err(|_| {
+                        "Couldn't write to roots config backup!".to_owned()
+                    });
             });
 
             println!("Performing backups:");
@@ -422,10 +428,10 @@ async fn main() {
 
             println!("Backup created:\n\t{}", backup_dir.display());
         }
-        Command::Collisions { root_dir } => monitor_index(root_dir, None),
+        Command::Collisions { root_dir } => monitor_index(root_dir, None)?,
         Command::Monitor { root_dir, interval } => {
             let millis = interval.unwrap_or(1000);
-            monitor_index(root_dir, Some(millis))
+            monitor_index(root_dir, Some(millis))?
         }
         Command::Render { path, quality } => {
             let filepath = path.to_owned().unwrap();
@@ -433,7 +439,7 @@ async fn main() {
                 "high" => PDFQuality::High,
                 "medium" => PDFQuality::Medium,
                 "low" => PDFQuality::Low,
-                _ => panic!("unknown render option"),
+                _ => return Err("unknown render option".to_owned()),
             };
             let buf = File::open(&filepath).unwrap();
             let dest_path = filepath.with_file_name(
@@ -455,11 +461,13 @@ async fn main() {
                 title,
                 desc,
             } => {
-                let root = provide_root(root_dir);
-                let url = url.as_ref().expect("ERROR: Url was not provided");
+                let root = provide_root(root_dir)?;
+                let url = url
+                    .as_ref()
+                    .ok_or_else(|| "Url was not provided".to_owned())?;
                 let title = title
                     .as_ref()
-                    .expect("ERROR: Title was not provided");
+                    .ok_or_else(|| "Title was not provided".to_owned())?;
 
                 println!("Saving link...");
 
@@ -474,7 +482,7 @@ async fn main() {
                     Ok(_) => {
                         println!("Link saved successfully!");
                     }
-                    Err(e) => println!("ERROR: {}", e),
+                    Err(e) => println!("{}", e),
                 }
             }
 
@@ -483,14 +491,13 @@ async fn main() {
                 file_path,
                 id,
             } => {
-                let root = provide_root(root_dir);
+                let root = provide_root(root_dir)?;
                 let link = commands::link::load_link(&root, file_path, id);
 
-                match link {
-                    Ok(link) => {
-                        println!("Link data:\n{:?}", link);
-                    }
-                    Err(e) => println!("ERROR: {}", e),
+                if let Ok(link) = link {
+                    println!("Link data:\n{:?}", link);
+                } else {
+                    return Err("Could not load link".to_owned());
                 }
             }
         },
@@ -505,7 +512,9 @@ async fn main() {
             } => {
                 let (file_path, storage_type) =
                     translate_storage(&Some(root_dir.to_owned()), storage)
-                        .expect("ERROR: Could not find storage folder");
+                        .ok_or_else(|| {
+                            "Could not find storage folder".to_owned()
+                        })?;
 
                 let storage_type = storage_type.unwrap_or(match type_ {
                     Some(t) => *t,
@@ -515,14 +524,16 @@ async fn main() {
                 let format = format.unwrap_or(Format::Raw);
 
                 let mut storage = Storage::new(file_path, storage_type)
-                    .expect("ERROR: Could not create storage");
+                    .map_err(|_| "Could not create storage".to_owned())?;
 
                 let resource_id = ResourceId::from_str(id)
-                    .expect("ERROR: Could not parse id");
+                    .map_err(|_| "Could not parse id".to_owned())?;
 
                 storage
                     .append(resource_id, content, format)
-                    .expect("ERROR: Could not append content to storage");
+                    .map_err(|_| {
+                        "Could not append content to storage".to_owned()
+                    })?;
             }
 
             FileCommand::Insert {
@@ -535,7 +546,9 @@ async fn main() {
             } => {
                 let (file_path, storage_type) =
                     translate_storage(&Some(root_dir.to_owned()), storage)
-                        .expect("ERROR: Could not find storage folder");
+                        .ok_or_else(|| {
+                            "Could not find storage folder".to_owned()
+                        })?;
 
                 let storage_type = storage_type.unwrap_or(match type_ {
                     Some(t) => *t,
@@ -545,14 +558,16 @@ async fn main() {
                 let format = format.unwrap_or(Format::Raw);
 
                 let mut storage = Storage::new(file_path, storage_type)
-                    .expect("ERROR: Could not create storage");
+                    .map_err(|_| "Could not create storage".to_owned())?;
 
                 let resource_id = ResourceId::from_str(id)
-                    .expect("ERROR: Could not parse id");
+                    .map_err(|_| "Could not parse id".to_owned())?;
 
                 storage
                     .insert(resource_id, content, format)
-                    .expect("ERROR: Could not insert content to storage");
+                    .map_err(|_| {
+                        "Could not insert content to storage".to_owned()
+                    })?;
             }
 
             FileCommand::Read {
@@ -563,7 +578,9 @@ async fn main() {
             } => {
                 let (file_path, storage_type) =
                     translate_storage(&Some(root_dir.to_owned()), storage)
-                        .expect("ERROR: Could not find storage folder");
+                        .ok_or_else(|| {
+                            "Could not find storage folder".to_owned()
+                        })?;
 
                 let storage_type = storage_type.unwrap_or(match type_ {
                     Some(t) => *t,
@@ -571,16 +588,19 @@ async fn main() {
                 });
 
                 let mut storage = Storage::new(file_path, storage_type)
-                    .expect("ERROR: Could not create storage");
+                    .map_err(|_| "Could not create storage".to_owned())?;
 
                 let resource_id = ResourceId::from_str(id)
-                    .expect("ERROR: Could not parse id");
+                    .map_err(|_| "Could not parse id".to_owned())?;
 
                 let output = storage.read(resource_id);
 
-                match output {
-                    Ok(output) => println!("{}", output),
-                    Err(e) => println!("ERROR: {}", e),
+                if let Ok(output) = output {
+                    println!("{}", output);
+                } else {
+                    return Err(
+                        "Could not read content from storage".to_owned()
+                    );
                 }
             }
         },
@@ -593,13 +613,14 @@ async fn main() {
             } => {
                 let storage = storage
                     .as_ref()
-                    .expect("ERROR: Storage was not provided");
+                    .ok_or_else(|| "Storage was not provided".to_owned())?;
 
                 let versions = versions.unwrap_or(false);
 
                 let (file_path, storage_type) =
-                    translate_storage(root_dir, storage)
-                        .expect("ERROR: Could not find storage folder");
+                    translate_storage(root_dir, storage).ok_or_else(|| {
+                        "Could not find storage folder".to_owned()
+                    })?;
 
                 let storage_type = storage_type.unwrap_or(match type_ {
                     Some(t) => *t,
@@ -607,18 +628,20 @@ async fn main() {
                 });
 
                 let mut storage = Storage::new(file_path, storage_type)
-                    .expect("ERROR: Could not create storage");
+                    .map_err(|_| "Could not create storage".to_owned())?;
 
                 storage
                     .load()
-                    .expect("ERROR: Could not load storage");
+                    .map_err(|_| "Could not load storage".to_owned())?;
 
                 let output = storage
                     .list(versions)
-                    .expect("ERROR: Could not list storage content");
+                    .map_err(|_| "Could not list storage content".to_owned())?;
 
                 println!("{}", output);
             }
         },
-    }
+    };
+
+    Ok(())
 }
