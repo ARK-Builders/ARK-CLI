@@ -3,6 +3,8 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use anyhow::Result;
+
 use arklib::id::ResourceId;
 use arklib::pdf::PDFQuality;
 use arklib::{app_id, provide_index};
@@ -22,12 +24,15 @@ use crate::models::format::Format;
 use crate::models::sort::Sort;
 use crate::models::storage::{Storage, StorageType};
 
+use crate::error::AppError;
+
 use util::{
     discover_roots, monitor_index, provide_root, read_storage_value,
     storages_exists, timestamp, translate_storage,
 };
 
 mod commands;
+mod error;
 mod models;
 mod util;
 
@@ -45,25 +50,24 @@ struct StorageEntry {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), String> {
+async fn main() -> Result<(), AppError> {
     env_logger::init();
 
     let args = models::cli::Cli::parse();
 
-    let app_id_dir = home_dir()
-        .ok_or_else(|| "Couldn't retrieve home directory!".to_owned())?;
+    let app_id_dir = home_dir().ok_or(AppError::HomeDirNotFound)?;
+
     let ark_dir = app_id_dir.join(".ark");
+
     if !ark_dir.exists() {
         std::fs::create_dir(&ark_dir)
-            .map_err(|e| format!("Couldn't create .ark directory: {}", e))?;
+            .map_err(|e| AppError::ArkDirectoryCreationError(e.to_string()))?;
     }
 
     println!("Loading app id at {}...", ark_dir.display());
 
-    let _ = app_id::load(ark_dir).map_err(|e| {
-        eprintln!("Couldn't load app id: {}", e);
-        std::process::exit(1);
-    });
+    let _ = app_id::load(ark_dir)
+        .map_err(|e| AppError::AppIdLoadError(e.to_string()))?;
 
     match &args.command {
         Command::List {
@@ -80,23 +84,23 @@ async fn main() -> Result<(), String> {
         } => {
             let root = provide_root(root_dir)?;
 
-            let entry_output =
-                match (entry, entry_id, entry_path) {
-                    (Some(e), false, false) => *e,
-                    (None, true, false) => EntryOutput::Id,
-                    (None, false, true) => EntryOutput::Path,
-                    (None, true, true) => EntryOutput::Both,
-                    (None, false, false) => EntryOutput::Link,
-                    _ => return Err(
-                        "You can't use both entry and entry_id or entry_path"
-                            .to_owned(),
-                    ),
-                };
+            let entry_output = match (entry, entry_id, entry_path) {
+                (Some(e), false, false) => *e,
+                (None, true, false) => EntryOutput::Id,
+                (None, false, true) => EntryOutput::Path,
+                (None, true, true) => EntryOutput::Both,
+                (None, false, false) => EntryOutput::Id,
+                _ => return Err(AppError::InvalidEntryOption),
+            };
 
             let mut storage_entries: Vec<StorageEntry> = provide_index(&root)
-                .map_err(|_| "Could not provide index".to_owned())?
+                .map_err(|_| {
+                    AppError::IndexError("Could not provide index".to_owned())
+                })?
                 .read()
-                .map_err(|_| "Could not read index".to_owned())?
+                .map_err(|_| {
+                    AppError::IndexError("Could not read index".to_owned())
+                })?
                 .path2id
                 .iter()
                 .filter_map(|(path, resource)| {
@@ -361,7 +365,7 @@ async fn main() -> Result<(), String> {
         Command::Backup { roots_cfg } => {
             let timestamp = timestamp().as_secs();
             let backup_dir = home_dir()
-                .ok_or_else(|| "Couldn't retrieve home directory!".to_owned())?
+                .ok_or(AppError::HomeDirNotFound)?
                 .join(ARK_BACKUPS_PATH)
                 .join(timestamp.to_string());
 
@@ -389,18 +393,20 @@ async fn main() -> Result<(), String> {
                 std::process::exit(0)
             }
 
-            create_dir_all(&backup_dir)
-                .map_err(|_| "Couldn't create backup directory!".to_owned())?;
+            create_dir_all(&backup_dir).map_err(|_| {
+                AppError::BackupCreationError(
+                    "Couldn't create backup directory!".to_owned(),
+                )
+            })?;
 
             let mut roots_cfg_backup =
-                File::create(backup_dir.join(ROOTS_CFG_FILENAME))
-                    .map_err(|_| "Couldn't backup roots config!".to_owned())?;
+                File::create(backup_dir.join(ROOTS_CFG_FILENAME))?;
 
             valid.iter().for_each(|root| {
-                let _ = writeln!(roots_cfg_backup, "{}", root.display())
-                    .map_err(|_| {
-                        "Couldn't write to roots config backup!".to_owned()
-                    });
+                let res = writeln!(roots_cfg_backup, "{}", root.display());
+                if let Err(e) = res {
+                    println!("Failed to write root to backup file: {}", e);
+                }
             });
 
             println!("Performing backups:");
@@ -439,7 +445,7 @@ async fn main() -> Result<(), String> {
                 "high" => PDFQuality::High,
                 "medium" => PDFQuality::Medium,
                 "low" => PDFQuality::Low,
-                _ => return Err("unknown render option".to_owned()),
+                _ => return Err(AppError::InvalidRenderOption),
             };
             let buf = File::open(&filepath).unwrap();
             let dest_path = filepath.with_file_name(
@@ -462,12 +468,16 @@ async fn main() -> Result<(), String> {
                 desc,
             } => {
                 let root = provide_root(root_dir)?;
-                let url = url
-                    .as_ref()
-                    .ok_or_else(|| "Url was not provided".to_owned())?;
-                let title = title
-                    .as_ref()
-                    .ok_or_else(|| "Title was not provided".to_owned())?;
+                let url = url.as_ref().ok_or_else(|| {
+                    AppError::LinkCreationError(
+                        "Url was not provided".to_owned(),
+                    )
+                })?;
+                let title = title.as_ref().ok_or_else(|| {
+                    AppError::LinkCreationError(
+                        "Title was not provided".to_owned(),
+                    )
+                })?;
 
                 println!("Saving link...");
 
@@ -492,13 +502,8 @@ async fn main() -> Result<(), String> {
                 id,
             } => {
                 let root = provide_root(root_dir)?;
-                let link = commands::link::load_link(&root, file_path, id);
-
-                if let Ok(link) = link {
-                    println!("Link data:\n{:?}", link);
-                } else {
-                    return Err("Could not load link".to_owned());
-                }
+                let link = commands::link::load_link(&root, file_path, id)?;
+                println!("Link data:\n{:?}", link);
             }
         },
         Command::File(file) => match &file {
@@ -512,9 +517,7 @@ async fn main() -> Result<(), String> {
             } => {
                 let (file_path, storage_type) =
                     translate_storage(&Some(root_dir.to_owned()), storage)
-                        .ok_or_else(|| {
-                            "Could not find storage folder".to_owned()
-                        })?;
+                        .ok_or(AppError::StorageNotFound(storage.to_owned()))?;
 
                 let storage_type = storage_type.unwrap_or(match type_ {
                     Some(t) => *t,
@@ -523,17 +526,11 @@ async fn main() -> Result<(), String> {
 
                 let format = format.unwrap_or(Format::Raw);
 
-                let mut storage = Storage::new(file_path, storage_type)
-                    .map_err(|_| "Could not create storage".to_owned())?;
+                let mut storage = Storage::new(file_path, storage_type)?;
 
-                let resource_id = ResourceId::from_str(id)
-                    .map_err(|_| "Could not parse id".to_owned())?;
+                let resource_id = ResourceId::from_str(id)?;
 
-                storage
-                    .append(resource_id, content, format)
-                    .map_err(|_| {
-                        "Could not append content to storage".to_owned()
-                    })?;
+                storage.append(resource_id, content, format)?;
             }
 
             FileCommand::Insert {
@@ -546,9 +543,7 @@ async fn main() -> Result<(), String> {
             } => {
                 let (file_path, storage_type) =
                     translate_storage(&Some(root_dir.to_owned()), storage)
-                        .ok_or_else(|| {
-                            "Could not find storage folder".to_owned()
-                        })?;
+                        .ok_or(AppError::StorageNotFound(storage.to_owned()))?;
 
                 let storage_type = storage_type.unwrap_or(match type_ {
                     Some(t) => *t,
@@ -557,17 +552,11 @@ async fn main() -> Result<(), String> {
 
                 let format = format.unwrap_or(Format::Raw);
 
-                let mut storage = Storage::new(file_path, storage_type)
-                    .map_err(|_| "Could not create storage".to_owned())?;
+                let mut storage = Storage::new(file_path, storage_type)?;
 
-                let resource_id = ResourceId::from_str(id)
-                    .map_err(|_| "Could not parse id".to_owned())?;
+                let resource_id = ResourceId::from_str(id)?;
 
-                storage
-                    .insert(resource_id, content, format)
-                    .map_err(|_| {
-                        "Could not insert content to storage".to_owned()
-                    })?;
+                storage.insert(resource_id, content, format)?;
             }
 
             FileCommand::Read {
@@ -578,30 +567,20 @@ async fn main() -> Result<(), String> {
             } => {
                 let (file_path, storage_type) =
                     translate_storage(&Some(root_dir.to_owned()), storage)
-                        .ok_or_else(|| {
-                            "Could not find storage folder".to_owned()
-                        })?;
+                        .ok_or(AppError::StorageNotFound(storage.to_owned()))?;
 
                 let storage_type = storage_type.unwrap_or(match type_ {
                     Some(t) => *t,
                     None => StorageType::File,
                 });
 
-                let mut storage = Storage::new(file_path, storage_type)
-                    .map_err(|_| "Could not create storage".to_owned())?;
+                let mut storage = Storage::new(file_path, storage_type)?;
 
-                let resource_id = ResourceId::from_str(id)
-                    .map_err(|_| "Could not parse id".to_owned())?;
+                let resource_id = ResourceId::from_str(id)?;
 
-                let output = storage.read(resource_id);
+                let output = storage.read(resource_id)?;
 
-                if let Ok(output) = output {
-                    println!("{}", output);
-                } else {
-                    return Err(
-                        "Could not read content from storage".to_owned()
-                    );
-                }
+                println!("{}", output);
             }
         },
         Command::Storage(cmd) => match &cmd {
@@ -611,32 +590,29 @@ async fn main() -> Result<(), String> {
                 type_,
                 versions,
             } => {
-                let storage = storage
-                    .as_ref()
-                    .ok_or_else(|| "Storage was not provided".to_owned())?;
+                let storage =
+                    storage
+                        .as_ref()
+                        .ok_or(AppError::StorageCreationError(
+                            "Storage was not provided".to_owned(),
+                        ))?;
 
                 let versions = versions.unwrap_or(false);
 
                 let (file_path, storage_type) =
-                    translate_storage(root_dir, storage).ok_or_else(|| {
-                        "Could not find storage folder".to_owned()
-                    })?;
+                    translate_storage(root_dir, storage)
+                        .ok_or(AppError::StorageNotFound(storage.to_owned()))?;
 
                 let storage_type = storage_type.unwrap_or(match type_ {
                     Some(t) => *t,
                     None => StorageType::File,
                 });
 
-                let mut storage = Storage::new(file_path, storage_type)
-                    .map_err(|_| "Could not create storage".to_owned())?;
+                let mut storage = Storage::new(file_path, storage_type)?;
 
-                storage
-                    .load()
-                    .map_err(|_| "Could not load storage".to_owned())?;
+                storage.load()?;
 
-                let output = storage
-                    .list(versions)
-                    .map_err(|_| "Could not list storage content".to_owned())?;
+                let output = storage.list(versions)?;
 
                 println!("{}", output);
             }

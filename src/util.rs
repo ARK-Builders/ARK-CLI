@@ -15,19 +15,19 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{fs::File, path::PathBuf};
 
+use crate::error::AppError;
 use crate::models::storage::{Storage, StorageType};
 use crate::ARK_CONFIG;
 
 pub fn discover_roots(
     roots_cfg: &Option<PathBuf>,
-) -> Result<Vec<PathBuf>, String> {
+) -> Result<Vec<PathBuf>, AppError> {
     if let Some(path) = roots_cfg {
         println!(
             "\tRoots config provided explicitly:\n\t\t{}",
             path.display()
         );
-        let config =
-            File::open(path).map_err(|e| "File doesn't exist!".to_owned())?;
+        let config = File::open(path)?;
 
         Ok(parse_roots(config))
     } else if let Ok(config) = File::open(ARK_CONFIG) {
@@ -60,13 +60,11 @@ pub fn discover_roots(
     }
 }
 
-pub fn provide_root(root_dir: &Option<PathBuf>) -> Result<PathBuf, String> {
+pub fn provide_root(root_dir: &Option<PathBuf>) -> Result<PathBuf, AppError> {
     if let Some(path) = root_dir {
         Ok(path.clone())
     } else {
-        current_dir()
-            .map_err(|e| "Can't open current directory!".to_owned())
-            .clone()
+        Ok(current_dir()?)
     }
 }
 
@@ -81,7 +79,7 @@ pub fn provide_index(root_dir: &PathBuf) -> ResourceIndex {
 pub fn monitor_index(
     root_dir: &Option<PathBuf>,
     interval: Option<u64>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let dir_path = provide_root(root_dir)?;
 
     println!("Building index of folder {}", dir_path.display());
@@ -231,10 +229,10 @@ pub fn read_storage_value(
     storage: &str,
     id: &str,
     type_: &Option<String>,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     let (file_path, storage_type) =
         translate_storage(&Some(root_dir.to_owned()), storage)
-            .expect("ERROR: Could not find storage folder");
+            .ok_or(AppError::StorageNotFound(storage.to_owned()))?;
 
     let storage_type = storage_type.unwrap_or(match type_ {
         Some(type_) => match type_.to_lowercase().as_str() {
@@ -245,11 +243,9 @@ pub fn read_storage_value(
         None => StorageType::File,
     });
 
-    let mut storage = Storage::new(file_path, storage_type)
-        .expect("ERROR: Could not create storage");
+    let mut storage = Storage::new(file_path, storage_type)?;
 
-    let resource_id =
-        ResourceId::from_str(id).expect("ERROR: Could not parse id");
+    let resource_id = ResourceId::from_str(id)?;
 
     storage.read(resource_id)
 }
