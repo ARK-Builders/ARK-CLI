@@ -72,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
             entry,
             entry_id,
             entry_path,
+            entry_link,
 
             root_dir,
             modified,
@@ -82,12 +83,13 @@ async fn main() -> anyhow::Result<()> {
         } => {
             let root = provide_root(root_dir)?;
 
-            let entry_output = match (entry, entry_id, entry_path) {
-                (Some(e), false, false) => Ok(*e),
-                (None, true, false) => Ok(EntryOutput::Id),
-                (None, false, true) => Ok(EntryOutput::Path),
-                (None, true, true) => Ok(EntryOutput::Both),
-                (None, false, false) => Ok(EntryOutput::Id),
+            let entry_output = match (entry, entry_id, entry_path, entry_link) {
+                (Some(e), false, false, false) => Ok(*e),
+                (None, true, false, false) => Ok(EntryOutput::Id),
+                (None, false, true, false) => Ok(EntryOutput::Path),
+                (None, true, true, false) => Ok(EntryOutput::Both),
+                (None, false, false, false) => Ok(EntryOutput::Id),
+                (None, false, false, true) => Ok(EntryOutput::Link),
                 _ => Err(AppError::InvalidEntryOption),
             }?;
 

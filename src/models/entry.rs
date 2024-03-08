@@ -16,6 +16,7 @@ impl std::str::FromStr for EntryOutput {
             "id" => Ok(EntryOutput::Id),
             "path" => Ok(EntryOutput::Path),
             "both" => Ok(EntryOutput::Both),
+            "link" => Ok(EntryOutput::Link),
             _ => Err("Entry output must be either 'id', 'path' or 'both'"),
         }
     }
