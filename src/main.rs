@@ -3,8 +3,6 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use anyhow::Result;
-
 use arklib::id::ResourceId;
 use arklib::pdf::PDFQuality;
 use arklib::{app_id, provide_index};
@@ -50,7 +48,7 @@ struct StorageEntry {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), AppError> {
+async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     let args = models::cli::Cli::parse();
@@ -85,13 +83,13 @@ async fn main() -> Result<(), AppError> {
             let root = provide_root(root_dir)?;
 
             let entry_output = match (entry, entry_id, entry_path) {
-                (Some(e), false, false) => *e,
-                (None, true, false) => EntryOutput::Id,
-                (None, false, true) => EntryOutput::Path,
-                (None, true, true) => EntryOutput::Both,
-                (None, false, false) => EntryOutput::Id,
-                _ => return Err(AppError::InvalidEntryOption),
-            };
+                (Some(e), false, false) => Ok(*e),
+                (None, true, false) => Ok(EntryOutput::Id),
+                (None, false, true) => Ok(EntryOutput::Path),
+                (None, true, true) => Ok(EntryOutput::Both),
+                (None, false, false) => Ok(EntryOutput::Id),
+                _ => Err(AppError::InvalidEntryOption),
+            }?;
 
             let mut storage_entries: Vec<StorageEntry> = provide_index(&root)
                 .map_err(|_| {
@@ -442,11 +440,11 @@ async fn main() -> Result<(), AppError> {
         Command::Render { path, quality } => {
             let filepath = path.to_owned().unwrap();
             let quality = match quality.to_owned().unwrap().as_str() {
-                "high" => PDFQuality::High,
-                "medium" => PDFQuality::Medium,
-                "low" => PDFQuality::Low,
-                _ => return Err(AppError::InvalidRenderOption),
-            };
+                "high" => Ok(PDFQuality::High),
+                "medium" => Ok(PDFQuality::Medium),
+                "low" => Ok(PDFQuality::Low),
+                _ => Err(AppError::InvalidRenderOption),
+            }?;
             let buf = File::open(&filepath).unwrap();
             let dest_path = filepath.with_file_name(
                 filepath
